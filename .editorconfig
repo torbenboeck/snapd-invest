@@ -1,0 +1,45 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,md}]
+indent_size = 2
+
+[*.{cs,csproj,sln,props,targets}]
+indent_size = 4
+
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+# C# coding conventions — aligned with project CLAUDE.md
+[*.cs]
+
+# Namespaces
+csharp_style_namespace_declarations = file_scoped:error
+
+# Modern syntax preferences
+csharp_prefer_braces = true:warning
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_elsewhere = false:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_prefer_simple_using_statement = true:suggestion
+
+# Nullable
+dotnet_diagnostic.CS8600.severity = error
+dotnet_diagnostic.CS8602.severity = error
+dotnet_diagnostic.CS8603.severity = error
+dotnet_diagnostic.CS8604.severity = error
+
+# No regions
+dotnet_diagnostic.IDE0005.severity = warning
