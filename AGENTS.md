@@ -113,7 +113,24 @@ These are non-negotiable. If a task seems to require breaking one, **stop and as
 - Default branch: `main`. Protected — no direct pushes, no force-push, no deletion.
 - Feature branches: `feature/<task-id>-<slug>`.
 - Bugfix branches: `bugfix/<task-id>-<slug>`.
-- Branches may be deleted by Claude Code only if they match `feature/*` or `bugfix/*` **and** are merged into `main`. Enforced by `.claude/hooks/pre-tool-bash.py`.
+- Chore branches: `chore/<short-slug>` for cross-cutting maintenance work.
+- Branches may be deleted by Claude Code only if they match `feature/*` or `bugfix/*` **and** are merged into `main`. Enforced by `.claude/hooks/pre_tool_bash.py`.
+
+### Local branch protection
+
+A repo-tracked git pre-commit hook in `scripts/git-hooks/pre-commit` rejects
+direct commits to `main`, `develop`, and `release/*`. Activate it once after
+cloning:
+
+```bash
+make install-hooks
+# or:
+git config core.hooksPath scripts/git-hooks
+```
+
+The hook protects against accidental direct commits — including manual ones,
+not just Claude Code's. Bypass with `--no-verify` is reserved for emergency
+hotfixes and is logged in the commit message.
 
 ---
 
