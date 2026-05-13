@@ -1,0 +1,145 @@
+# ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# uv
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints
+
+# ============================================================================
+# .NET
+# ============================================================================
+bin/
+obj/
+*.suo
+*.user
+*.userprefs
+*.dbmdl
+*.dbproj.schemaview
+*.publishsettings
+node_modules/
+*.tlog
+*.cache
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.sln.iml
+.vshistory/
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.VisualState.xml
+TestResult.xml
+nunit-*.xml
+
+# NSwag generated client (regenerated on build)
+**/Generated/
+
+# ============================================================================
+# Secrets and local config
+# ============================================================================
+.env
+.env.local
+.env.*.local
+*.secret
+secrets/
+appsettings.Development.json
+appsettings.Local.json
+**/User Secrets/
+
+# ============================================================================
+# Databases
+# ============================================================================
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+
+# ============================================================================
+# OS
+# ============================================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================================
+# Editors
+# ============================================================================
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ============================================================================
+# Project-specific
+# ============================================================================
+# Local data caches
+engine/data/cache/
+engine/data/raw/
+
+# Local audit logs
+engine/logs/
+
+# Local agent runs
+engine/runs/
+
+# Backup files
+*.bak
+*.backup
