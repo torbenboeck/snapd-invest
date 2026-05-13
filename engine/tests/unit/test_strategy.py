@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.portfolio import create_account
 from snapd_invest.strategy import SMACrossoverConfig, SMACrossoverStrategy
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import FakeClock
 
 
 def _make_bars(symbol: str, closes: list[Decimal]) -> list[BarData]:
@@ -51,9 +55,7 @@ class TestSMACrossoverStrategy:
             bars=_make_bars("X", [Decimal("100")] * 10),
             source="t",
         )
-        strategy = SMACrossoverStrategy(
-            SMACrossoverConfig(short_period=5, long_period=20)
-        )
+        strategy = SMACrossoverStrategy(SMACrossoverConfig(short_period=5, long_period=20))
 
         signals = await strategy.run(
             db_session,
@@ -71,21 +73,19 @@ class TestSMACrossoverStrategy:
         instrument = await ensure_instrument(
             db_session, symbol="X", exchange="Y", instrument_type="stock", currency="USD"
         )
-        # Construct a series where the short SMA crosses up through the long SMA.
+        # Construct a series where the short SMA crosses up through the long SMA
+        # at the LAST bar (crossover() only inspects the final two values).
         # Long period 5, short period 2.
-        # Closes: lots of low prices, then a sharp rise at the end.
         closes = (
             [Decimal("100")] * 10
-            + [Decimal("90")] * 5    # short and long both decline
-            + [Decimal("80"), Decimal("80")]  # short dips below long firmly
-            + [Decimal("200"), Decimal("200")]  # short surges above long
+            + [Decimal("90")] * 5  # short and long both decline
+            + [Decimal("80"), Decimal("80"), Decimal("80")]  # short dips below long firmly
+            + [Decimal("200")]  # final bar drives short above long
         )
         await upsert_bars(
             db_session, instrument=instrument, bars=_make_bars("X", closes), source="t"
         )
-        strategy = SMACrossoverStrategy(
-            SMACrossoverConfig(short_period=2, long_period=5)
-        )
+        strategy = SMACrossoverStrategy(SMACrossoverConfig(short_period=2, long_period=5))
 
         signals = await strategy.run(
             db_session,
@@ -105,18 +105,18 @@ class TestSMACrossoverStrategy:
         instrument = await ensure_instrument(
             db_session, symbol="X", exchange="Y", instrument_type="stock", currency="USD"
         )
+        # Mirror of the golden-cross test: the death-cross fires only on the
+        # transition at the final bar.
         closes = (
             [Decimal("100")] * 10
             + [Decimal("150")] * 5
-            + [Decimal("200"), Decimal("200")]
-            + [Decimal("50"), Decimal("50")]
+            + [Decimal("200"), Decimal("200"), Decimal("200")]
+            + [Decimal("50")]
         )
         await upsert_bars(
             db_session, instrument=instrument, bars=_make_bars("X", closes), source="t"
         )
-        strategy = SMACrossoverStrategy(
-            SMACrossoverConfig(short_period=2, long_period=5)
-        )
+        strategy = SMACrossoverStrategy(SMACrossoverConfig(short_period=2, long_period=5))
 
         signals = await strategy.run(
             db_session,

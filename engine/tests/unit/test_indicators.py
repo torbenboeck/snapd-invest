@@ -9,7 +9,7 @@ import pytest
 from snapd_invest.indicators import crossover, ema, is_nan, sma
 
 
-def D(s: str) -> Decimal:  # noqa: N802 - shorthand
+def D(s: str) -> Decimal:
     return Decimal(s)
 
 

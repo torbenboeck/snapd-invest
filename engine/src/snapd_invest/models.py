@@ -14,7 +14,7 @@ Conventions:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - SQLAlchemy resolves Mapped[datetime] at runtime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -61,9 +61,7 @@ class AuditEvent(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
 
-    __table_args__ = (
-        Index("ix_audit_events_type_occurred_at", "type", "occurred_at"),
-    )
+    __table_args__ = (Index("ix_audit_events_type_occurred_at", "type", "occurred_at"),)
 
 
 # ----------------------------------------------------------------------------
@@ -107,9 +105,7 @@ class Bar(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "instrument_id", "interval", "timestamp", name="uq_bars_inst_int_ts"
-        ),
+        UniqueConstraint("instrument_id", "interval", "timestamp", name="uq_bars_inst_int_ts"),
         Index("ix_bars_inst_int_ts", "instrument_id", "interval", "timestamp"),
     )
 
@@ -138,9 +134,7 @@ class Position(Base):
     __tablename__ = "positions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    account_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False)
     instrument_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("instruments.id"), nullable=False
     )
@@ -162,9 +156,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    account_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False)
     instrument_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("instruments.id"), nullable=False
     )
@@ -186,9 +178,7 @@ class Trade(Base):
     __tablename__ = "trades"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    order_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("orders.id"), nullable=False
-    )
+    order_id: Mapped[str] = mapped_column(String(36), ForeignKey("orders.id"), nullable=False)
     fill_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
     fill_quantity: Mapped[Decimal] = mapped_column(_QTY, nullable=False)
     fees: Mapped[Decimal] = mapped_column(_PRICE, nullable=False, default=Decimal("0"))
@@ -234,6 +224,4 @@ class Recommendation(Base):
     correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    resolved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from snapd_invest.agent import (
     CONSERVATIVE_VALUE,
@@ -14,18 +14,18 @@ from snapd_invest.agent import (
     ensure_default_agent,
     run_agent,
 )
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
-from snapd_invest.llm import FakeLlmProvider
+from snapd_invest.llm import FakeLlmProvider, LlmResponse
 from snapd_invest.portfolio import create_account
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-async def _setup_world(
-    session: AsyncSession, clock: FakeClock
-) -> tuple[object, object, object]:
-    account = await create_account(
-        session, clock, name="paper", initial_cash=Decimal("100000")
-    )
+    from snapd_invest.clock import FakeClock
+
+
+async def _setup_world(session: AsyncSession, clock: FakeClock) -> tuple[object, object, object]:
+    account = await create_account(session, clock, name="paper", initial_cash=Decimal("100000"))
     instrument = await ensure_instrument(
         session,
         symbol="AAPL",
@@ -63,9 +63,7 @@ class TestEnsureDefaultAgent:
         assert agent.id
         assert agent.name == CONSERVATIVE_VALUE.name
 
-    async def test_returns_existing(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_returns_existing(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account = await create_account(db_session, fake_clock, name="paper")
         first = await ensure_default_agent(db_session, fake_clock, account=account)
         second = await ensure_default_agent(db_session, fake_clock, account=account)
@@ -173,8 +171,6 @@ class TestRunAgent:
     ) -> None:
         _, instrument, agent = await _setup_world(db_session, fake_clock)
         llm = FakeLlmProvider()
-        from snapd_invest.llm import LlmResponse
-
         llm.enqueue(LlmResponse(text="not-json", parsed=None))
 
         with pytest.raises(ValueError, match="parseable JSON"):

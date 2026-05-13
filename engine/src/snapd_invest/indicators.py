@@ -11,8 +11,11 @@ of the same length, with `None`-equivalent leading values represented as
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def is_nan(value: Decimal) -> bool:
@@ -68,6 +71,9 @@ def ema(values: Sequence[Decimal], period: int) -> list[Decimal]:
     return out
 
 
+_MIN_CROSSOVER_HISTORY = 2
+
+
 def crossover(short: Sequence[Decimal], long: Sequence[Decimal]) -> int:
     """Detect a crossover at the *last* index.
 
@@ -76,7 +82,7 @@ def crossover(short: Sequence[Decimal], long: Sequence[Decimal]) -> int:
         -1 if short crossed *below* long (sell signal)
         0  otherwise (no crossover, or insufficient data)
     """
-    if len(short) != len(long) or len(short) < 2:
+    if len(short) != len(long) or len(short) < _MIN_CROSSOVER_HISTORY:
         return 0
     prev_short, prev_long = short[-2], long[-2]
     last_short, last_long = short[-1], long[-1]

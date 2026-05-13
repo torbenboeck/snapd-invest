@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from snapd_invest.broker import OrderRequest, PaperBroker
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.portfolio import build_summary, create_account, get_account_by_name
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import FakeClock
 
 
 def _bar(symbol: str, ts: datetime, close: Decimal) -> BarData:
@@ -28,9 +32,7 @@ def _bar(symbol: str, ts: datetime, close: Decimal) -> BarData:
 
 
 class TestCreateAccount:
-    async def test_persists_account(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_persists_account(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account = await create_account(
             db_session, fake_clock, name="paper", initial_cash=Decimal("10000")
         )
@@ -46,9 +48,7 @@ class TestCreateAccount:
 
 
 class TestGetAccountByName:
-    async def test_returns_existing(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_returns_existing(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         created = await create_account(db_session, fake_clock, name="paper")
         found = await get_account_by_name(db_session, "paper")
         assert found is not None
@@ -60,9 +60,7 @@ class TestGetAccountByName:
 
 
 class TestBuildSummary:
-    async def test_empty_account(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_empty_account(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account = await create_account(
             db_session, fake_clock, name="paper", initial_cash=Decimal("5000")
         )

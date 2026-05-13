@@ -15,21 +15,25 @@ user (or a future auto-approve gate) decides whether to execute.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from snapd_invest.clock import Clock
 from snapd_invest.llm import ILlmProvider, LlmRequest
-from snapd_invest.models import Account, Agent as AgentModel, Instrument
+from snapd_invest.models import Account, Instrument, new_id
+from snapd_invest.models import Agent as AgentModel
 from snapd_invest.portfolio import build_summary
 from snapd_invest.strategy import Signal
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import Clock
 
 log: structlog.stdlib.BoundLogger = structlog.get_logger(__name__)
 
@@ -284,8 +288,6 @@ async def ensure_default_agent(
     personality: Personality = CONSERVATIVE_VALUE,
 ) -> AgentModel:
     """Get or create an enabled agent bound to the given account with the personality."""
-    from snapd_invest.models import new_id
-
     stmt = select(AgentModel).where(AgentModel.name == personality.name)
     existing = (await session.execute(stmt)).scalar_one_or_none()
     if existing is not None:

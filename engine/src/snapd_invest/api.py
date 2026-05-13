@@ -7,17 +7,14 @@ HTTP wiring only. Business logic lives in `strategy.py`, `agent.py`,
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from pydantic import BaseModel
 
 from snapd_invest import __version__
 from snapd_invest.agent import (
@@ -33,7 +30,6 @@ from snapd_invest.data import ensure_instrument
 from snapd_invest.execution import execute_signals
 from snapd_invest.llm import OllamaProvider
 from snapd_invest.logging_config import configure_logging, get_logger
-from snapd_invest.models import Agent as AgentModel, Instrument
 from snapd_invest.persistence import make_engine, make_session_factory, session_scope
 from snapd_invest.portfolio import (
     build_summary,
@@ -50,6 +46,12 @@ from snapd_invest.recommendation import (
 )
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import SMACrossoverStrategy
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    from fastapi import Response
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 log: structlog.stdlib.BoundLogger = get_logger(__name__)
 
@@ -126,7 +128,10 @@ async def session_dep(
 # ----------------------------------------------------------------------------
 
 
-async def correlation_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+async def correlation_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     correlation_id = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
@@ -187,7 +192,7 @@ class RunOnceResponseDto(BaseModel):
     correlation_id: str
     strategy: str
     signals: list[SignalDto]
-    outcomes: list[dict]
+    outcomes: list[dict[str, Any]]
 
 
 class RecommendationDto(BaseModel):
@@ -220,7 +225,7 @@ class RejectRequest(BaseModel):
 class ApproveResponseDto(BaseModel):
     recommendation_id: str
     status: str
-    execution_summaries: list[dict]
+    execution_summaries: list[dict[str, Any]]
 
 
 ApproveRequest.model_rebuild()
@@ -372,7 +377,7 @@ def create_app() -> FastAPI:
         llm: Annotated[OllamaProvider, Depends(llm_dep)],
         instrument_symbol: str = "AAPL",
         instrument_exchange: str = "NASDAQ",
-    ) -> dict:
+    ) -> dict[str, Any]:
         correlation_id = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())
         account = await get_account_by_name(session, "paper")
         if account is None:
@@ -492,7 +497,7 @@ def create_app() -> FastAPI:
         payload: RejectRequest | None,
         session: Annotated[AsyncSession, Depends(session_dep)],
         clock: Annotated[Clock, Depends(clock_dep)],
-    ) -> dict:
+    ) -> dict[str, Any]:
         rec = await get_recommendation(session, rec_id)
         if rec is None:
             raise HTTPException(404, detail=f"recommendation {rec_id} not found")

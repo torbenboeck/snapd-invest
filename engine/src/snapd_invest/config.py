@@ -43,12 +43,12 @@ class Settings(BaseSettings):
     @property
     def db_url(self) -> str:
         """Async SQLAlchemy URL for the configured SQLite path."""
-        return f"sqlite+aiosqlite:///{self.db_path}"
+        return f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
 
     @property
     def db_url_sync(self) -> str:
         """Sync SQLAlchemy URL (used by Alembic migrations)."""
-        return f"sqlite:///{self.db_path}"
+        return f"sqlite:///{self.db_path.as_posix()}"
 
 
 def get_settings() -> Settings:
