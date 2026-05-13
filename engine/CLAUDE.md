@@ -28,7 +28,7 @@ No pandas at MVP — only used if a strategy explicitly needs it. Use raw lists 
 One file per concept. Split when a file grows past ~300 lines or develops sub-concerns.
 
 ```
-src/algo_invest/
+src/snapd_invest/
 ├── __init__.py
 ├── api.py              FastAPI app, routes, DI
 ├── audit.py            AuditEvent recording + queries
@@ -160,7 +160,7 @@ log.info(f"Signal emitted for {symbol}")  # f-string hides structure
 uv sync
 
 # Run
-uv run uvicorn algo_invest.api:app --reload --port 8000
+uv run uvicorn snapd_invest.api:app --reload --port 8000
 
 # Test
 uv run pytest

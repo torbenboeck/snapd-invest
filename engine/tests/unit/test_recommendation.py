@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.recommendation`."""
+"""Tests for `snapd_invest.recommendation`."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.agent import CONSERVATIVE_VALUE, ensure_default_agent
-from algo_invest.broker import PaperBroker
-from algo_invest.clock import FakeClock
-from algo_invest.data import BarData, ensure_instrument, upsert_bars
-from algo_invest.portfolio import create_account
-from algo_invest.recommendation import (
+from snapd_invest.agent import CONSERVATIVE_VALUE, ensure_default_agent
+from snapd_invest.broker import PaperBroker
+from snapd_invest.clock import FakeClock
+from snapd_invest.data import BarData, ensure_instrument, upsert_bars
+from snapd_invest.portfolio import create_account
+from snapd_invest.recommendation import (
     SignalModification,
     approve_and_execute,
     create_recommendation,
@@ -22,8 +22,8 @@ from algo_invest.recommendation import (
     list_recommendations,
     reject,
 )
-from algo_invest.risk import RiskConfig
-from algo_invest.strategy import Signal
+from snapd_invest.risk import RiskConfig
+from snapd_invest.strategy import Signal
 
 
 async def _setup_world(

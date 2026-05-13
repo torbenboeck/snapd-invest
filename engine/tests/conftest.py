@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from algo_invest.clock import FakeClock
-from algo_invest.persistence import Base
+from snapd_invest.clock import FakeClock
+from snapd_invest.persistence import Base
 
 
 @pytest.fixture

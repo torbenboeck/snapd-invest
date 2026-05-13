@@ -21,7 +21,7 @@ Concrete, verifiable. A reviewer should be able to read this and decide PASS or 
 
 Files this task is allowed to create or modify. Anything outside this list requires a follow-up task or an explicit note in the PR.
 
-- `engine/src/algo_invest/example.py`
+- `engine/src/snapd_invest/example.py`
 - `engine/tests/unit/test_example.py`
 
 ## Out of scope

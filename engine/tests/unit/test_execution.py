@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.execution`."""
+"""Tests for `snapd_invest.execution`."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.audit import list_events
-from algo_invest.broker import PaperBroker
-from algo_invest.clock import FakeClock
-from algo_invest.data import BarData, ensure_instrument, upsert_bars
-from algo_invest.execution import execute_signal
-from algo_invest.models import Order, Position
-from algo_invest.portfolio import create_account
-from algo_invest.risk import RiskConfig
-from algo_invest.strategy import Signal
+from snapd_invest.audit import list_events
+from snapd_invest.broker import PaperBroker
+from snapd_invest.clock import FakeClock
+from snapd_invest.data import BarData, ensure_instrument, upsert_bars
+from snapd_invest.execution import execute_signal
+from snapd_invest.models import Order, Position
+from snapd_invest.portfolio import create_account
+from snapd_invest.risk import RiskConfig
+from snapd_invest.strategy import Signal
 
 
 def _setup_signal(account_id: str) -> Signal:

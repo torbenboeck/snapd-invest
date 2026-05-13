@@ -36,13 +36,13 @@ Open two terminals:
 **Terminal 1 — engine:**
 ```bash
 cd engine
-uv run uvicorn algo_invest.api:app --reload --port 8000
+uv run uvicorn snapd_invest.api:app --reload --port 8000
 ```
 
 **Terminal 2 — CLI:**
 ```bash
 cd cli
-dotnet run --project src/AlgoInvest.Cli -- status
+dotnet run --project src/SnapdInvest.Cli -- status
 ```
 
 ## Configuration
@@ -51,8 +51,8 @@ The engine reads configuration from `engine/.env` (not committed). Copy `engine/
 
 ```bash
 # engine/.env
-ALGOINVEST_DB_PATH=./data/algo_invest.db
-ALGOINVEST_LOG_LEVEL=INFO
+SNAPDINVEST_DB_PATH=./data/snapd_invest.db
+SNAPDINVEST_LOG_LEVEL=INFO
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.1
 
@@ -61,7 +61,7 @@ OLLAMA_MODEL=llama3.1
 # SAXO_TOKEN=...
 ```
 
-The CLI reads `cli/src/AlgoInvest.Cli/appsettings.json` plus `appsettings.Development.json` (not committed). Or use `--engine-url` to override.
+The CLI reads `cli/src/SnapdInvest.Cli/appsettings.json` plus `appsettings.Development.json` (not committed). Or use `--engine-url` to override.
 
 ## Verifying
 
@@ -71,12 +71,12 @@ curl http://localhost:8000/v1/health
 # {"status":"ok","version":"0.1.0"}
 
 # Engine responds to CLI
-cd cli && dotnet run --project src/AlgoInvest.Cli -- status
+cd cli && dotnet run --project src/SnapdInvest.Cli -- status
 ```
 
 ## Troubleshooting
 
 - **`uv: command not found`** — install uv (see Prerequisites).
-- **`Failed to apply migration`** — delete `engine/data/algo_invest.db` and retry; we're pre-MVP, no production data to protect.
+- **`Failed to apply migration`** — delete `engine/data/snapd_invest.db` and retry; we're pre-MVP, no production data to protect.
 - **`Connection refused` from CLI** — the engine isn't running, or it's on a different port. Check `http://localhost:8000/v1/health`.
 - **Ollama errors when running agents** — `ollama serve` must be running, and the configured model must be pulled.

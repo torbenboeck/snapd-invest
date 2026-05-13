@@ -20,13 +20,13 @@ dotnet test
 dotnet format
 
 # Run commands
-dotnet run --project src/AlgoInvest.Cli -- status
-dotnet run --project src/AlgoInvest.Cli -- run-once --symbol AAPL --exchange NASDAQ
-dotnet run --project src/AlgoInvest.Cli -- run-agent
-dotnet run --project src/AlgoInvest.Cli -- recos
-dotnet run --project src/AlgoInvest.Cli -- approve <id> --modify AAPL@NASDAQ=2.0
-dotnet run --project src/AlgoInvest.Cli -- reject <id> --reason "not now"
-dotnet run --project src/AlgoInvest.Cli -- audit --limit 20
+dotnet run --project src/SnapdInvest.Cli -- status
+dotnet run --project src/SnapdInvest.Cli -- run-once --symbol AAPL --exchange NASDAQ
+dotnet run --project src/SnapdInvest.Cli -- run-agent
+dotnet run --project src/SnapdInvest.Cli -- recos
+dotnet run --project src/SnapdInvest.Cli -- approve <id> --modify AAPL@NASDAQ=2.0
+dotnet run --project src/SnapdInvest.Cli -- reject <id> --reason "not now"
+dotnet run --project src/SnapdInvest.Cli -- audit --limit 20
 ```
 
 ## Configuration
@@ -34,7 +34,7 @@ dotnet run --project src/AlgoInvest.Cli -- audit --limit 20
 Engine URL resolution order:
 
 1. CLI option `--Engine:Url=...`
-2. Environment variable `ALGOINVEST_Engine__Url`
+2. Environment variable `SNAPDINVEST_Engine__Url`
 3. `appsettings.json`
 4. Default `http://localhost:8000`
 
@@ -42,9 +42,9 @@ Engine URL resolution order:
 
 ```
 src/
-├── AlgoInvest.Cli/         Spectre.Console host, commands, formatting
-└── AlgoInvest.Client/      Refit-based HTTP client + DTOs
+├── SnapdInvest.Cli/         Spectre.Console host, commands, formatting
+└── SnapdInvest.Client/      Refit-based HTTP client + DTOs
 
 tests/
-└── AlgoInvest.Cli.Tests.Unit/
+└── SnapdInvest.Cli.Tests.Unit/
 ```

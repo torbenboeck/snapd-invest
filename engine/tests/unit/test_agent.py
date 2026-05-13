@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.agent`."""
+"""Tests for `snapd_invest.agent`."""
 
 from __future__ import annotations
 
@@ -8,16 +8,16 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.agent import (
+from snapd_invest.agent import (
     CONSERVATIVE_VALUE,
     Personality,
     ensure_default_agent,
     run_agent,
 )
-from algo_invest.clock import FakeClock
-from algo_invest.data import BarData, ensure_instrument, upsert_bars
-from algo_invest.llm import FakeLlmProvider
-from algo_invest.portfolio import create_account
+from snapd_invest.clock import FakeClock
+from snapd_invest.data import BarData, ensure_instrument, upsert_bars
+from snapd_invest.llm import FakeLlmProvider
+from snapd_invest.portfolio import create_account
 
 
 async def _setup_world(
@@ -173,7 +173,7 @@ class TestRunAgent:
     ) -> None:
         _, instrument, agent = await _setup_world(db_session, fake_clock)
         llm = FakeLlmProvider()
-        from algo_invest.llm import LlmResponse
+        from snapd_invest.llm import LlmResponse
 
         llm.enqueue(LlmResponse(text="not-json", parsed=None))
 

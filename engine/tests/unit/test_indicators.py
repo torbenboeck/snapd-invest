@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.indicators`."""
+"""Tests for `snapd_invest.indicators`."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from algo_invest.indicators import crossover, ema, is_nan, sma
+from snapd_invest.indicators import crossover, ema, is_nan, sma
 
 
 def D(s: str) -> Decimal:  # noqa: N802 - shorthand
