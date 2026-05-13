@@ -7,10 +7,11 @@ invalid configuration causes a fail-fast crash rather than a runtime surprise.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,6 +40,59 @@ class Settings(BaseSettings):
     )
     api_host: str = Field(default="127.0.0.1")
     api_port: int = Field(default=8000)
+
+    # ------------------------------------------------------------------
+    # Scheduler
+    # ------------------------------------------------------------------
+    scheduler_enabled: bool = Field(
+        default=True,
+        description="Start the background scheduler on app startup. Disable for tests/dev.",
+    )
+    microtrader_interval_minutes: int = Field(
+        default=1,
+        ge=1,
+        description="Minutes between MicroTrader ticks.",
+    )
+    agent_interval_minutes: int = Field(
+        default=30,
+        ge=1,
+        description="Minutes between agent runs.",
+    )
+    recommendation_expire_interval_minutes: int = Field(
+        default=5,
+        ge=1,
+        description="Minutes between recommendation-expiry sweeps.",
+    )
+
+    # ------------------------------------------------------------------
+    # Watchlist
+    # ------------------------------------------------------------------
+    watchlist_raw: str | None = Field(
+        default=None,
+        description="Raw comma-separated watchlist from environment.",
+        exclude=True,
+    )
+    default_account_name: str = Field(
+        default="paper",
+        description="Account name the scheduled jobs operate against.",
+    )
+
+    def __init__(self, **data: Any) -> None:
+        """Initialize settings, handling watchlist from SNAPDINVEST_WATCHLIST env var."""
+        # If watchlist is not in data, check the env var directly
+        if "watchlist_raw" not in data:
+            watchlist_env = os.environ.get("SNAPDINVEST_WATCHLIST")
+            if watchlist_env:
+                data["watchlist_raw"] = watchlist_env
+        super().__init__(**data)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def watchlist(self) -> list[str]:
+        """Parse comma-separated watchlist, defaulting to AAPL@NASDAQ."""
+        if self.watchlist_raw:
+            return [item.strip() for item in self.watchlist_raw.split(",")]
+        return ["AAPL@NASDAQ"]
 
     @property
     def db_url(self) -> str:
