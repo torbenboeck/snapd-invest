@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout *)",
+      "Bash(git config *)",
+      "Bash(echo \"hooksPath: $\\(git config core.hooksPath\\)\")",
+      "Bash(git stash *)",
+      "Bash(git commit *)",
+      "Bash(git add *)",
+      "Bash(perl --version)",
+      "Bash(grep -v '^engine/uv\\\\.lock$')",
+      "Bash(tee /tmp/rename-files.txt)",
+      "Bash(xargs grep -l 'algo_invest\\\\|algoinvest\\\\|ALGOINVEST\\\\|AlgoInvest\\\\|algo-invest')"
+    ]
+  }
+}

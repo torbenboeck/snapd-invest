@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from algo_invest import __version__
-from algo_invest.api import create_app
+from snapd_invest import __version__
+from snapd_invest.api import create_app
 
 
 class TestHealth:

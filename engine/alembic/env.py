@@ -2,7 +2,7 @@
 
 Uses the sync SQLAlchemy URL from `Settings.db_url_sync` so Alembic can run
 its own connection without async overhead. The models themselves are imported
-from `algo_invest.models` (and `algo_invest.persistence.Base` for metadata).
+from `snapd_invest.models` (and `snapd_invest.persistence.Base` for metadata).
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from algo_invest.config import get_settings
-from algo_invest.persistence import Base
-from algo_invest import models  # noqa: F401 - registers models with Base.metadata
+from snapd_invest.config import get_settings
+from snapd_invest.persistence import Base
+from snapd_invest import models  # noqa: F401 - registers models with Base.metadata
 
 config = context.config
 settings = get_settings()

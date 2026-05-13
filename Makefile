@@ -38,7 +38,7 @@ format:
 	cd cli && dotnet format
 
 dev-engine:
-	cd engine && uv run uvicorn algo_invest.api:app --reload --port 8000
+	cd engine && uv run uvicorn snapd_invest.api:app --reload --port 8000
 
 clean:
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +

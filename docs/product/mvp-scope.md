@@ -82,12 +82,12 @@ Democratize informed investing by giving non-experts access to multiple agent pe
 The MVP is "done" when, in a single session, the user can:
 
 1. Start the engine and CLI locally.
-2. Run `algoinvest status` and see an empty portfolio with cash balance.
-3. Run `algoinvest run-once` and see the MicroTrader emit (or correctly skip) a signal based on current market data.
-4. Run `algoinvest run-once --agent` and see the agent produce a recommendation.
-5. Run `algoinvest recos` and see the pending recommendation with the agent's rationale.
-6. Run `algoinvest approve <id>` and see the recommendation execute against the paper broker.
-7. Run `algoinvest audit` and trace the entire flow from signal to fill.
+2. Run `snapdinvest status` and see an empty portfolio with cash balance.
+3. Run `snapdinvest run-once` and see the MicroTrader emit (or correctly skip) a signal based on current market data.
+4. Run `snapdinvest run-once --agent` and see the agent produce a recommendation.
+5. Run `snapdinvest recos` and see the pending recommendation with the agent's rationale.
+6. Run `snapdinvest approve <id>` and see the recommendation execute against the paper broker.
+7. Run `snapdinvest audit` and trace the entire flow from signal to fill.
 8. All of the above with reasonable performance (no command takes > 5s on local data).
 
 When this works end-to-end, MVP is done. Anything else is post-MVP.

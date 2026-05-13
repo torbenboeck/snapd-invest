@@ -25,11 +25,11 @@ See:
 cd engine
 uv sync
 uv run alembic upgrade head
-uv run uvicorn algo_invest.api:app --reload --port 8000
+uv run uvicorn snapd_invest.api:app --reload --port 8000
 
 # .NET CLI (separate terminal)
 cd cli
-dotnet run --project src/AlgoInvest.Cli -- status
+dotnet run --project src/SnapdInvest.Cli -- status
 ```
 
 Full setup: [`docs/setup.md`](docs/setup.md) (TODO).

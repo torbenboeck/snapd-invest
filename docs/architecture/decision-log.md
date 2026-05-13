@@ -115,7 +115,7 @@ Two stacks (Python and .NET) could each have their own database, but that introd
 
 ### Decision
 
-- The Python engine owns a single SQLite database at `engine/data/algo_invest.db`.
+- The Python engine owns a single SQLite database at `engine/data/snapd_invest.db`.
 - The .NET CLI does not persist state at MVP. All reads/writes go through the engine HTTP API.
 - Schema is migration-friendly to PostgreSQL via Alembic. Avoid SQLite-only features.
 - Monetary values use `DECIMAL` with explicit precision (18, 4).

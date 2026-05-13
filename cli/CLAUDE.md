@@ -21,11 +21,11 @@ Personal preferences live in `~/.claude/CLAUDE.md`. Repo-level guidance is in `.
 
 ```
 src/
-├── AlgoInvest.Cli/         Spectre.Console host, commands, formatting
-└── AlgoInvest.Client/      Typed HTTP client for the engine
+├── SnapdInvest.Cli/         Spectre.Console host, commands, formatting
+└── SnapdInvest.Client/      Typed HTTP client for the engine
 
 tests/
-└── AlgoInvest.Cli.Tests.Unit/
+└── SnapdInvest.Cli.Tests.Unit/
 ```
 
 ---
@@ -67,12 +67,12 @@ Project-specific additions:
 
 | Command | Description |
 |---|---|
-| `algoinvest status` | Show portfolio, cash, open positions, pending recommendations |
-| `algoinvest run-once` | Manually trigger strategy / agent runs |
-| `algoinvest audit [--limit N]` | Show recent audit events |
-| `algoinvest recos` | List pending recommendations |
-| `algoinvest approve <id>` | Approve a recommendation (with optional quantity/price modification) |
-| `algoinvest reject <id>` | Reject a pending recommendation |
+| `snapdinvest status` | Show portfolio, cash, open positions, pending recommendations |
+| `snapdinvest run-once` | Manually trigger strategy / agent runs |
+| `snapdinvest audit [--limit N]` | Show recent audit events |
+| `snapdinvest recos` | List pending recommendations |
+| `snapdinvest approve <id>` | Approve a recommendation (with optional quantity/price modification) |
+| `snapdinvest reject <id>` | Reject a pending recommendation |
 
 Each command renders output with Spectre.Console — tables for lists, panels for detail views, prompts for confirmations.
 
@@ -83,7 +83,7 @@ Each command renders output with Spectre.Console — tables for lists, panels fo
 The engine URL is configured via:
 
 1. `--engine-url` CLI option (highest priority)
-2. `ALGOINVEST_ENGINE_URL` environment variable
+2. `SNAPDINVEST_ENGINE_URL` environment variable
 3. `appsettings.json` → `Engine:Url`
 4. Default: `http://localhost:8000`
 
@@ -126,6 +126,6 @@ dotnet format
 dotnet format --verify-no-changes
 
 # Run a command
-dotnet run --project src/AlgoInvest.Cli -- status
-dotnet run --project src/AlgoInvest.Cli -- audit --limit 20
+dotnet run --project src/SnapdInvest.Cli -- status
+dotnet run --project src/SnapdInvest.Cli -- audit --limit 20
 ```

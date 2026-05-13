@@ -13,7 +13,7 @@ Adding `SaxoBroker` (targeting SIM) is the next external-system integration. It 
 
 ## Acceptance criteria
 
-- [ ] `SaxoBroker` class in `engine/src/algo_invest/broker.py` implementing `IBroker`
+- [ ] `SaxoBroker` class in `engine/src/snapd_invest/broker.py` implementing `IBroker`
 - [ ] OAuth2 client_credentials flow against Saxo SIM auth endpoint, with token refresh
 - [ ] All Saxo HTTP calls go through a single `httpx.AsyncClient` instance, configurable timeout
 - [ ] `engine/.env.example` updated with `SAXO_ENV`, `SAXO_CLIENT_ID`, `SAXO_CLIENT_SECRET`
@@ -33,8 +33,8 @@ Adding `SaxoBroker` (targeting SIM) is the next external-system integration. It 
 
 ## Files in scope
 
-- `engine/src/algo_invest/broker.py`
-- `engine/src/algo_invest/config.py`
+- `engine/src/snapd_invest/broker.py`
+- `engine/src/snapd_invest/config.py`
 - `engine/.env.example`
 - `engine/tests/unit/test_saxo_broker.py` (new)
 - `docs/architecture/decision-log.md`

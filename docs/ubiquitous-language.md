@@ -26,7 +26,7 @@ A real-time price update. Not stored long-term — only buffered in memory.
 ### Indicator
 A pure mathematical function over bars. Examples: SMA, EMA, RSI, ATR, MACD.
 
-Lives in `engine/src/algo_invest/indicators.py`. **Indicators are not strategies.**
+Lives in `engine/src/snapd_invest/indicators.py`. **Indicators are not strategies.**
 
 ---
 
@@ -51,14 +51,14 @@ A deterministic rule-based signal generator. Examples: `SMACrossoverStrategy`, `
 
 Strategies are **pure functions** over market data + portfolio state → signals. No I/O inside the strategy itself.
 
-Lives in `engine/src/algo_invest/strategy.py`.
+Lives in `engine/src/snapd_invest/strategy.py`.
 
 ### Agent
 An LLM-powered signal generator with a configured **personality** and **interests**. Produces signals by reasoning over context (portfolio, market state, news).
 
 Agent output is wrapped in a **recommendation** before reaching the user.
 
-Lives in `engine/src/algo_invest/agent.py`.
+Lives in `engine/src/snapd_invest/agent.py`.
 
 ### Personality
 A bundle of dispositions applied to an agent: risk tolerance, time horizon, conviction threshold, preferred instruments. Encoded as a prompt template + a typed config object (e.g. `Personality(name="conservative_value", risk=0.3, horizon_days=90, ...)`).
@@ -69,7 +69,7 @@ A topic or sector an agent focuses on. Examples: `cleantech`, `defence`, `bonds`
 ### Risk Gate
 The single point through which **all** signals pass before becoming orders. Validates: position sizing, max daily loss, instrument allowlist, environment consistency (paper vs sim vs live), and the kill switch state.
 
-Lives in `engine/src/algo_invest/risk.py`. **Always on.** Including for human-approved trades.
+Lives in `engine/src/snapd_invest/risk.py`. **Always on.** Including for human-approved trades.
 
 ### Recommendation
 A signal (or set of signals) that requires human approval before execution. Has lifecycle:
@@ -78,7 +78,7 @@ A signal (or set of signals) that requires human approval before execution. Has 
 
 Modifications: the user may change quantity, price, or instrument before approval. The modified version is what executes.
 
-Lives in `engine/src/algo_invest/recommendation.py`.
+Lives in `engine/src/snapd_invest/recommendation.py`.
 
 ### Order
 A request to a broker to execute a trade. Carries `idempotency_key`. Lifecycle:

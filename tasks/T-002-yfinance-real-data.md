@@ -18,14 +18,14 @@ Strategies depend on bars being present in the DB. Without a real provider, the 
 - [ ] Both providers run inside `asyncio.to_thread()` since the underlying libraries are sync
 - [ ] Conversion from provider-specific shapes to `BarData` is well-tested
 - [ ] Refresh job registered in `scheduler.py` to refresh bars for a configured watchlist every N minutes
-- [ ] Watchlist configurable via env (`ALGOINVEST_WATCHLIST=AAPL@NASDAQ,BTC-USD@BINANCE,...`)
+- [ ] Watchlist configurable via env (`SNAPDINVEST_WATCHLIST=AAPL@NASDAQ,BTC-USD@BINANCE,...`)
 - [ ] Errors from providers are logged and do not crash the scheduler
 
 ## Files in scope
 
-- `engine/src/algo_invest/data.py`
-- `engine/src/algo_invest/scheduler.py`
-- `engine/src/algo_invest/config.py`
+- `engine/src/snapd_invest/data.py`
+- `engine/src/snapd_invest/scheduler.py`
+- `engine/src/snapd_invest/config.py`
 - `engine/tests/unit/test_data.py` (extend)
 
 ## Out of scope
@@ -42,5 +42,5 @@ uv run ruff check
 uv run mypy src
 uv run pytest tests/unit/test_data.py -v
 # Ad-hoc manual check (do not commit):
-uv run python -c "import asyncio; from algo_invest.data import YFinanceProvider; print(asyncio.run(YFinanceProvider().fetch_bars(symbol='AAPL', exchange='NASDAQ', interval='1d', limit=5)))"
+uv run python -c "import asyncio; from snapd_invest.data import YFinanceProvider; print(asyncio.run(YFinanceProvider().fetch_bars(symbol='AAPL', exchange='NASDAQ', interval='1d', limit=5)))"
 ```
