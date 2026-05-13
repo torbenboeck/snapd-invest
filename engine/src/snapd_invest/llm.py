@@ -34,8 +34,7 @@ class LlmResponse:
 class ILlmProvider(Protocol):
     """Generate text or structured JSON from a prompt."""
 
-    async def generate(self, request: LlmRequest) -> LlmResponse:
-        ...
+    async def generate(self, request: LlmRequest) -> LlmResponse: ...
 
 
 # ----------------------------------------------------------------------------

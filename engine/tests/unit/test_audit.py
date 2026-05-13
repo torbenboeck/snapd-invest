@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from snapd_invest.audit import list_events, record_event
-from snapd_invest.clock import FakeClock
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import FakeClock
 
 
 class TestRecordEvent:
-    async def test_persists_event(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_persists_event(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         event = await record_event(
             db_session,
             fake_clock,
@@ -32,9 +34,7 @@ class TestRecordEvent:
         self, db_session: AsyncSession, fake_clock: FakeClock
     ) -> None:
         fake_clock.set(datetime(2030, 6, 15, 9, 0, 0, tzinfo=UTC))
-        event = await record_event(
-            db_session, fake_clock, event_type="test", payload={}
-        )
+        event = await record_event(db_session, fake_clock, event_type="test", payload={})
         assert event.occurred_at == datetime(2030, 6, 15, 9, 0, 0, tzinfo=UTC)
 
     async def test_rejects_empty_type(
@@ -84,9 +84,7 @@ class TestListEvents:
         events = await list_events(db_session)
         assert [e.type for e in events] == ["c", "b", "a"]
 
-    async def test_filters_by_type(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_filters_by_type(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         await record_event(db_session, fake_clock, event_type="signal", payload={})
         fake_clock.advance(seconds=1)
         await record_event(db_session, fake_clock, event_type="order", payload={})
@@ -99,21 +97,15 @@ class TestListEvents:
     async def test_filters_by_correlation_id(
         self, db_session: AsyncSession, fake_clock: FakeClock
     ) -> None:
-        await record_event(
-            db_session, fake_clock, event_type="a", payload={}, correlation_id="x"
-        )
-        await record_event(
-            db_session, fake_clock, event_type="b", payload={}, correlation_id="y"
-        )
+        await record_event(db_session, fake_clock, event_type="a", payload={}, correlation_id="x")
+        await record_event(db_session, fake_clock, event_type="b", payload={}, correlation_id="y")
         await db_session.commit()
 
         events = await list_events(db_session, correlation_id="x")
         assert len(events) == 1
         assert events[0].type == "a"
 
-    async def test_filters_by_since(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_filters_by_since(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         await record_event(db_session, fake_clock, event_type="old", payload={})
         cutoff = fake_clock.now()
         fake_clock.advance(seconds=10)
@@ -125,9 +117,7 @@ class TestListEvents:
         # cutoff is >= old's occurred_at, so old is included
         assert "new" in types
 
-    async def test_respects_limit(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_respects_limit(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         for _ in range(5):
             await record_event(db_session, fake_clock, event_type="t", payload={})
             fake_clock.advance(seconds=1)

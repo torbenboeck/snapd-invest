@@ -16,13 +16,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from snapd_invest.clock import Clock
-from snapd_invest.models import Account, Instrument, Order, Position, Trade, new_id
+from snapd_invest.models import Account, Bar, Instrument, Order, Position, Trade, new_id
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import Clock
 
 Side = Literal["buy", "sell"]
 
@@ -99,12 +102,9 @@ class PaperBroker:
         # Determine fill price
         fill_price: Decimal | None = last_price
         if request.limit_price is not None:
-            if request.side == "buy" and last_price > request.limit_price:
-                fill_price = None
-            elif request.side == "sell" and last_price < request.limit_price:
-                fill_price = None
-            else:
-                fill_price = request.limit_price
+            buy_above_limit = request.side == "buy" and last_price > request.limit_price
+            sell_below_limit = request.side == "sell" and last_price < request.limit_price
+            fill_price = None if buy_above_limit or sell_below_limit else request.limit_price
 
         if fill_price is None:
             order = await self._persist_order(session, request, status="rejected")
@@ -120,8 +120,6 @@ class PaperBroker:
     async def get_last_price(
         self, session: AsyncSession, *, instrument: Instrument
     ) -> Decimal | None:
-        from snapd_invest.models import Bar
-
         stmt = (
             select(Bar)
             .where(Bar.instrument_id == instrument.id)
@@ -133,9 +131,7 @@ class PaperBroker:
 
     # ----- internals -----
 
-    async def _find_by_idempotency_key(
-        self, session: AsyncSession, key: str
-    ) -> Order | None:
+    async def _find_by_idempotency_key(self, session: AsyncSession, key: str) -> Order | None:
         stmt = select(Order).where(Order.idempotency_key == key)
         return (await session.execute(stmt)).scalar_one_or_none()
 

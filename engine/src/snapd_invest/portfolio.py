@@ -9,16 +9,21 @@ This module owns the *queries* and the *math*.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from snapd_invest.clock import Clock
 from snapd_invest.models import Account, Bar, Instrument, Position, new_id
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import Clock
 
 
 @dataclass(slots=True, frozen=True)
@@ -108,9 +113,7 @@ async def build_summary(
 
     for position in positions:
         instrument = (
-            await session.execute(
-                select(Instrument).where(Instrument.id == position.instrument_id)
-            )
+            await session.execute(select(Instrument).where(Instrument.id == position.instrument_id))
         ).scalar_one()
         last = await _last_price(session, instrument)
         if last is None:

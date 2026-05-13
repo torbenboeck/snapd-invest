@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.portfolio import create_account
 from snapd_invest.risk import RiskConfig, SignalCandidate, evaluate
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import FakeClock
 
 
 def _bar(symbol: str, close: Decimal) -> BarData:
@@ -27,9 +30,7 @@ def _bar(symbol: str, close: Decimal) -> BarData:
 
 
 class TestRiskGate:
-    async def test_allows_normal_buy(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_allows_normal_buy(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account = await create_account(
             db_session, fake_clock, name="paper", initial_cash=Decimal("100000")
         )
@@ -157,9 +158,7 @@ class TestRiskGate:
         assert decision.reason is not None
         assert "position_too_large" in decision.reason
 
-    async def test_insufficient_cash(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_insufficient_cash(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account = await create_account(
             db_session, fake_clock, name="paper", initial_cash=Decimal("100")
         )

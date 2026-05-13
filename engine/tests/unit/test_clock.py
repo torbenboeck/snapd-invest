@@ -30,7 +30,7 @@ class TestFakeClock:
 
     def test_initial_must_be_timezone_aware(self) -> None:
         with pytest.raises(ValueError, match="timezone-aware"):
-            FakeClock(initial=datetime(2026, 1, 1, 12, 0, 0))  # noqa: DTZ001
+            FakeClock(initial=datetime(2026, 1, 1, 12, 0, 0))
 
     def test_set_updates_time(self) -> None:
         clock = FakeClock()
@@ -41,7 +41,7 @@ class TestFakeClock:
     def test_set_requires_timezone_aware(self) -> None:
         clock = FakeClock()
         with pytest.raises(ValueError, match="timezone-aware"):
-            clock.set(datetime(2030, 1, 1, 12, 0, 0))  # noqa: DTZ001
+            clock.set(datetime(2030, 1, 1, 12, 0, 0))
 
     def test_set_normalizes_to_utc(self) -> None:
         clock = FakeClock()

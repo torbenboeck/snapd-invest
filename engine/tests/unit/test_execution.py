@@ -4,19 +4,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from snapd_invest.audit import list_events
 from snapd_invest.broker import PaperBroker
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.execution import execute_signal
 from snapd_invest.models import Order, Position
 from snapd_invest.portfolio import create_account
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import FakeClock
 
 
 def _setup_signal(account_id: str) -> Signal:
@@ -75,9 +79,7 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)
 
-        outcome = await execute_signal(
-            db_session, fake_clock, broker, RiskConfig(), signal
-        )
+        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
 
         assert outcome.gate_allowed
         assert outcome.order_status == "filled"

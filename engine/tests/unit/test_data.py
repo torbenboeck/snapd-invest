@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import (
     BarData,
     FakeMarketDataProvider,
@@ -16,6 +14,11 @@ from snapd_invest.data import (
     refresh_bars,
     upsert_bars,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import FakeClock
 
 
 def _bar(symbol: str, ts: datetime, close: Decimal) -> BarData:
@@ -73,9 +76,7 @@ class TestUpsertBars:
         base = datetime(2026, 5, 1, tzinfo=UTC)
         bars = [_bar("AAPL", base + timedelta(days=i), Decimal("100")) for i in range(3)]
 
-        inserted = await upsert_bars(
-            db_session, instrument=instrument, bars=bars, source="test"
-        )
+        inserted = await upsert_bars(db_session, instrument=instrument, bars=bars, source="test")
         assert inserted == 3
 
     async def test_skips_duplicates(self, db_session: AsyncSession) -> None:
@@ -109,9 +110,7 @@ class TestLoadRecentBars:
         bars = [_bar("AAPL", base + timedelta(days=i), Decimal(100 + i)) for i in range(5)]
         await upsert_bars(db_session, instrument=instrument, bars=bars, source="test")
 
-        loaded = await load_recent_bars(
-            db_session, instrument=instrument, interval="1d", limit=3
-        )
+        loaded = await load_recent_bars(db_session, instrument=instrument, interval="1d", limit=3)
         # Most recent 3, oldest first
         assert [b.close for b in loaded] == [Decimal("102"), Decimal("103"), Decimal("104")]
 

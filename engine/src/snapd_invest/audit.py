@@ -10,15 +10,19 @@ responsibility — `record_event` validates only that the payload is JSON-encoda
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from snapd_invest.clock import Clock
 from snapd_invest.models import AuditEvent, new_id
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import Clock
 
 
 async def record_event(
@@ -38,7 +42,7 @@ async def record_event(
         raise ValueError("event_type must be non-empty")
 
     try:
-        payload_json = json.dumps(payload, default=str, sort_keys=True)
+        payload_json = json.dumps(payload, sort_keys=True)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"payload is not JSON-encodable: {exc}") from exc
 
@@ -54,6 +58,9 @@ async def record_event(
     return event
 
 
+MAX_AUDIT_LIMIT = 1000
+
+
 async def list_events(
     session: AsyncSession,
     *,
@@ -63,8 +70,8 @@ async def list_events(
     limit: int = 100,
 ) -> Sequence[AuditEvent]:
     """Return audit events matching the filters, newest first."""
-    if limit <= 0 or limit > 1000:
-        raise ValueError("limit must be between 1 and 1000")
+    if limit <= 0 or limit > MAX_AUDIT_LIMIT:
+        raise ValueError(f"limit must be between 1 and {MAX_AUDIT_LIMIT}")
 
     stmt = select(AuditEvent)
     if event_type is not None:

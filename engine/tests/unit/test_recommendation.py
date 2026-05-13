@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from snapd_invest.agent import CONSERVATIVE_VALUE, ensure_default_agent
+from snapd_invest.agent import ensure_default_agent
 from snapd_invest.broker import PaperBroker
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.portfolio import create_account
 from snapd_invest.recommendation import (
@@ -25,13 +24,14 @@ from snapd_invest.recommendation import (
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-async def _setup_world(
-    session: AsyncSession, clock: FakeClock
-) -> tuple[object, object, object]:
-    account = await create_account(
-        session, clock, name="paper", initial_cash=Decimal("100000")
-    )
+    from snapd_invest.clock import FakeClock
+
+
+async def _setup_world(session: AsyncSession, clock: FakeClock) -> tuple[object, object, object]:
+    account = await create_account(session, clock, name="paper", initial_cash=Decimal("100000"))
     instrument = await ensure_instrument(
         session, symbol="AAPL", exchange="NASDAQ", instrument_type="stock", currency="USD"
     )
@@ -72,9 +72,7 @@ def _signal(account_id: str, quantity: Decimal = Decimal("5")) -> Signal:
 
 
 class TestCreateRecommendation:
-    async def test_persists_pending(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_persists_pending(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account, _, agent = await _setup_world(db_session, fake_clock)
         rec = await create_recommendation(
             db_session,
@@ -86,9 +84,7 @@ class TestCreateRecommendation:
         assert rec.status == "pending"
         assert rec.expires_at > rec.created_at
 
-    async def test_rejects_empty(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_rejects_empty(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         _, _, agent = await _setup_world(db_session, fake_clock)
         with pytest.raises(ValueError, match="at least one signal"):
             await create_recommendation(
@@ -97,9 +93,7 @@ class TestCreateRecommendation:
 
 
 class TestListRecommendations:
-    async def test_filters_by_status(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_filters_by_status(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account, _, agent = await _setup_world(db_session, fake_clock)
         rec = await create_recommendation(
             db_session,
@@ -219,18 +213,14 @@ class TestApproveAndExecute:
             rationale="t",
         )
         broker = PaperBroker(fake_clock)
-        await approve_and_execute(
-            db_session, fake_clock, broker, RiskConfig(), recommendation=rec
-        )
+        await approve_and_execute(db_session, fake_clock, broker, RiskConfig(), recommendation=rec)
         # Try again
         with pytest.raises(ValueError, match="not pending"):
             await approve_and_execute(
                 db_session, fake_clock, broker, RiskConfig(), recommendation=rec
             )
 
-    async def test_rejects_expired(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_rejects_expired(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account, _, agent = await _setup_world(db_session, fake_clock)
         rec = await create_recommendation(
             db_session,
@@ -250,9 +240,7 @@ class TestApproveAndExecute:
 
 
 class TestReject:
-    async def test_marks_rejected(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_marks_rejected(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account, _, agent = await _setup_world(db_session, fake_clock)
         rec = await create_recommendation(
             db_session,

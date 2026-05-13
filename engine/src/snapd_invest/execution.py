@@ -12,18 +12,23 @@ reaching this module.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from snapd_invest.audit import record_event
 from snapd_invest.broker import IBroker, OrderRequest
-from snapd_invest.clock import Clock
 from snapd_invest.models import Account, Instrument
 from snapd_invest.risk import RiskConfig, SignalCandidate, evaluate
-from snapd_invest.strategy import Signal
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import Clock
+    from snapd_invest.strategy import Signal
 
 
 @dataclass(slots=True, frozen=True)
@@ -47,12 +52,8 @@ def _make_idempotency_key(signal: Signal) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
-async def _load_instrument(
-    session: AsyncSession, *, symbol: str, exchange: str
-) -> Instrument:
-    stmt = select(Instrument).where(
-        Instrument.symbol == symbol, Instrument.exchange == exchange
-    )
+async def _load_instrument(session: AsyncSession, *, symbol: str, exchange: str) -> Instrument:
+    stmt = select(Instrument).where(Instrument.symbol == symbol, Instrument.exchange == exchange)
     return (await session.execute(stmt)).scalar_one()
 
 

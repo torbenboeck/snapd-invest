@@ -15,23 +15,26 @@ audit log preserves both the original proposal and the user's edits.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from snapd_invest.audit import record_event
-from snapd_invest.broker import IBroker
-from snapd_invest.clock import Clock
 from snapd_invest.execution import execute_signals
 from snapd_invest.models import Recommendation, new_id
-from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.broker import IBroker
+    from snapd_invest.clock import Clock
+    from snapd_invest.risk import RiskConfig
 
 DEFAULT_TTL_HOURS = 24
 
@@ -57,8 +60,6 @@ def _serialize_signals(signals: Sequence[Signal]) -> str:
 
 
 def _deserialize_signals(raw: str) -> list[Signal]:
-    from datetime import datetime
-
     data = json.loads(raw)
     return [
         Signal(
@@ -147,9 +148,7 @@ async def get_recommendation(
     session: AsyncSession, recommendation_id: str
 ) -> Recommendation | None:
     return (
-        await session.execute(
-            select(Recommendation).where(Recommendation.id == recommendation_id)
-        )
+        await session.execute(select(Recommendation).where(Recommendation.id == recommendation_id))
     ).scalar_one_or_none()
 
 

@@ -9,10 +9,13 @@ Adds: instruments, bars, accounts, positions, orders, trades.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 revision: str = "0002"
 down_revision: str | None = "0001"
@@ -47,13 +50,9 @@ def upgrade() -> None:
         sa.Column("source", sa.String(length=32), nullable=False),
         sa.ForeignKeyConstraint(["instrument_id"], ["instruments.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "instrument_id", "interval", "timestamp", name="uq_bars_inst_int_ts"
-        ),
+        sa.UniqueConstraint("instrument_id", "interval", "timestamp", name="uq_bars_inst_int_ts"),
     )
-    op.create_index(
-        "ix_bars_inst_int_ts", "bars", ["instrument_id", "interval", "timestamp"]
-    )
+    op.create_index("ix_bars_inst_int_ts", "bars", ["instrument_id", "interval", "timestamp"])
 
     op.create_table(
         "accounts",
@@ -79,9 +78,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"]),
         sa.ForeignKeyConstraint(["instrument_id"], ["instruments.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "account_id", "instrument_id", name="uq_positions_account_inst"
-        ),
+        sa.UniqueConstraint("account_id", "instrument_id", name="uq_positions_account_inst"),
     )
 
     op.create_table(

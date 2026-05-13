@@ -6,8 +6,8 @@ Each test gets its own engine + session.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy.ext.asyncio import (
@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import (
 
 from snapd_invest.clock import FakeClock
 from snapd_invest.persistence import Base
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 @pytest.fixture
