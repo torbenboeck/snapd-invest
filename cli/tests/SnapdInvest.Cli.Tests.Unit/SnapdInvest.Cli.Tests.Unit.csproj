@@ -4,6 +4,8 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>SnapdInvest.Cli.Tests.Unit</RootNamespace>
+    <!-- CA1707: tests use Method_Scenario_Expected naming (xUnit convention). -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

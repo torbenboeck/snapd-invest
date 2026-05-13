@@ -1,3 +1,4 @@
+using System.Globalization;
 using SnapdInvest.Client;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -37,6 +38,7 @@ public sealed class RunAgentCommand(IEngineApi api) : AsyncCommand<RunAgentComma
             else
             {
                 AnsiConsole.MarkupLineInterpolated(
+                    CultureInfo.InvariantCulture,
                     $"[green]Recommendation created:[/] {result.RecommendationId}");
                 AnsiConsole.MarkupLine("Run [cyan]snapdinvest recos[/] to inspect, then [cyan]snapdinvest approve <id>[/] to execute.");
             }
@@ -45,7 +47,7 @@ public sealed class RunAgentCommand(IEngineApi api) : AsyncCommand<RunAgentComma
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] {ex.Message}");
+            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
             return 1;
         }
     }

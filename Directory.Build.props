@@ -14,7 +14,10 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest</AnalysisLevel>
     <AnalysisMode>Recommended</AnalysisMode>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- IDE0005 (remove unused usings) requires the XML doc file to be
+         generated; CS1591 (missing XML doc) is suppressed to keep us free
+         of doc-comment ceremony. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 

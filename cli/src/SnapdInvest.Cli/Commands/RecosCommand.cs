@@ -1,3 +1,4 @@
+using System.Globalization;
 using SnapdInvest.Client;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -27,6 +28,7 @@ public sealed class RecosCommand(IEngineApi api) : AsyncCommand<RecosCommand.Set
             if (recos.Count == 0)
             {
                 AnsiConsole.MarkupLineInterpolated(
+                    CultureInfo.InvariantCulture,
                     $"[grey]No recommendations with status='{settings.Status}'.[/]");
                 return 0;
             }
@@ -49,7 +51,7 @@ public sealed class RecosCommand(IEngineApi api) : AsyncCommand<RecosCommand.Set
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] {ex.Message}");
+            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
             return 1;
         }
     }
