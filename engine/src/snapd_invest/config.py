@@ -7,12 +7,11 @@ invalid configuration causes a fail-fast crash rather than a runtime surprise.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, computed_field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -67,32 +66,25 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Watchlist
     # ------------------------------------------------------------------
-    watchlist_raw: str | None = Field(
-        default=None,
-        description="Raw comma-separated watchlist from environment.",
-        exclude=True,
+    watchlist: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["AAPL@NASDAQ"],
+        description=(
+            "Instruments the scheduler runs strategies/agents against. "
+            "Comma-separated SYMBOL@EXCHANGE entries when set via env."
+        ),
     )
     default_account_name: str = Field(
         default="paper",
         description="Account name the scheduled jobs operate against.",
     )
 
-    def __init__(self, **data: Any) -> None:
-        """Initialize settings, handling watchlist from SNAPDINVEST_WATCHLIST env var."""
-        # If watchlist is not in data, check the env var directly
-        if "watchlist_raw" not in data:
-            watchlist_env = os.environ.get("SNAPDINVEST_WATCHLIST")
-            if watchlist_env:
-                data["watchlist_raw"] = watchlist_env
-        super().__init__(**data)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def watchlist(self) -> list[str]:
-        """Parse comma-separated watchlist, defaulting to AAPL@NASDAQ."""
-        if self.watchlist_raw:
-            return [item.strip() for item in self.watchlist_raw.split(",")]
-        return ["AAPL@NASDAQ"]
+    @field_validator("watchlist", mode="before")
+    @classmethod
+    def _split_watchlist_from_string(cls, value: object) -> object:
+        """Allow comma-separated strings for env-var convenience."""
+        if isinstance(value, str):
+            return [entry.strip() for entry in value.split(",") if entry.strip()]
+        return value
 
     @property
     def db_url(self) -> str:
