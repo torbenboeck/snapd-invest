@@ -1,3 +1,4 @@
+using System.Globalization;
 using SnapdInvest.Client;
 using SnapdInvest.Client.Models;
 using Spectre.Console;
@@ -24,12 +25,14 @@ public sealed class RejectCommand(IEngineApi api) : AsyncCommand<RejectCommand.S
                 settings.RecommendationId,
                 new RejectRequest(settings.Reason));
 
-            AnsiConsole.MarkupLineInterpolated($"[grey]Rejected:[/] {settings.RecommendationId}");
+            AnsiConsole.MarkupLineInterpolated(
+                CultureInfo.InvariantCulture,
+                $"[grey]Rejected:[/] {settings.RecommendationId}");
             return 0;
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] {ex.Message}");
+            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
             return 1;
         }
     }

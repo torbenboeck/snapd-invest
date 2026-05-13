@@ -1,3 +1,4 @@
+using System.Globalization;
 using SnapdInvest.Client;
 using SnapdInvest.Client.Models;
 using Spectre.Console;
@@ -38,6 +39,7 @@ public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand
                 new ApproveRequest(mods.Count == 0 ? null : mods));
 
             AnsiConsole.MarkupLineInterpolated(
+                CultureInfo.InvariantCulture,
                 $"[green]Status:[/] {response.Status}  [grey](id={response.RecommendationId})[/]");
 
             foreach (var o in response.ExecutionSummaries)
@@ -48,11 +50,15 @@ public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand
                 if (!allowed)
                 {
                     var reason = o.TryGetValue("gate_reason", out var r) ? r?.ToString() : "?";
-                    AnsiConsole.MarkupLineInterpolated($"  [red]{instrument}[/]: blocked ({reason})");
+                    AnsiConsole.MarkupLineInterpolated(
+                        CultureInfo.InvariantCulture,
+                        $"  [red]{instrument}[/]: blocked ({reason})");
                 }
                 else
                 {
-                    AnsiConsole.MarkupLineInterpolated($"  [green]{instrument}[/]: {status}");
+                    AnsiConsole.MarkupLineInterpolated(
+                        CultureInfo.InvariantCulture,
+                        $"  [green]{instrument}[/]: {status}");
                 }
             }
 
@@ -60,7 +66,7 @@ public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] {ex.Message}");
+            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
             return 1;
         }
     }

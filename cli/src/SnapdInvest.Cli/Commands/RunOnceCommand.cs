@@ -1,3 +1,4 @@
+using System.Globalization;
 using SnapdInvest.Client;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -22,8 +23,11 @@ public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand
             var result = await api.RunOnceAsync(settings.Symbol, settings.Exchange);
 
             AnsiConsole.MarkupLineInterpolated(
+                CultureInfo.InvariantCulture,
                 $"[bold]Strategy:[/] {result.Strategy}  [grey](corr={result.CorrelationId})[/]");
-            AnsiConsole.MarkupLineInterpolated($"[bold]Signals:[/] {result.Signals.Count}");
+            AnsiConsole.MarkupLineInterpolated(
+                CultureInfo.InvariantCulture,
+                $"[bold]Signals:[/] {result.Signals.Count}");
 
             if (result.Signals.Count == 0)
             {
@@ -68,11 +72,14 @@ public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand
                 if (!allowed)
                 {
                     AnsiConsole.MarkupLineInterpolated(
+                        CultureInfo.InvariantCulture,
                         $"  [red]{instrument}[/]: blocked by risk gate ({reason})");
                 }
                 else
                 {
-                    AnsiConsole.MarkupLineInterpolated($"  [green]{instrument}[/]: {status}");
+                    AnsiConsole.MarkupLineInterpolated(
+                        CultureInfo.InvariantCulture,
+                        $"  [green]{instrument}[/]: {status}");
                 }
             }
 
@@ -80,7 +87,7 @@ public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] {ex.Message}");
+            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
             return 1;
         }
     }
