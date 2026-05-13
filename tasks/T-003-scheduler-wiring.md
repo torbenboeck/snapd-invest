@@ -28,9 +28,9 @@ All jobs must use the same handler functions exposed by the HTTP API, so manual 
 
 ## Files in scope
 
-- `engine/src/algo_invest/scheduler.py`
-- `engine/src/algo_invest/api.py`
-- `engine/src/algo_invest/config.py`
+- `engine/src/snapd_invest/scheduler.py`
+- `engine/src/snapd_invest/api.py`
+- `engine/src/snapd_invest/config.py`
 - `engine/tests/unit/test_scheduler.py` (new)
 
 ## Out of scope

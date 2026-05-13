@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.broker.PaperBroker`."""
+"""Tests for `snapd_invest.broker.PaperBroker`."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.broker import OrderRequest, PaperBroker
-from algo_invest.clock import FakeClock
-from algo_invest.data import BarData, ensure_instrument, upsert_bars
-from algo_invest.models import Position
-from algo_invest.portfolio import create_account
+from snapd_invest.broker import OrderRequest, PaperBroker
+from snapd_invest.clock import FakeClock
+from snapd_invest.data import BarData, ensure_instrument, upsert_bars
+from snapd_invest.models import Position
+from snapd_invest.portfolio import create_account
 
 
 def _bar(symbol: str, ts: datetime, close: Decimal) -> BarData:

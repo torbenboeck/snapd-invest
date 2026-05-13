@@ -11,7 +11,7 @@ Update when module responsibilities change materially.
 ```
 snapd-invest/
 ├── engine/                  Python service
-│   └── src/algo_invest/     One package, flat modules
+│   └── src/snapd_invest/     One package, flat modules
 ├── cli/                     .NET 10 CLI
 │   └── src/                 Standard .NET layout
 ├── docs/                    Architecture, product, language
@@ -22,7 +22,7 @@ snapd-invest/
 
 ---
 
-## Python engine modules (`engine/src/algo_invest/`)
+## Python engine modules (`engine/src/snapd_invest/`)
 
 Each module is one file at MVP. Split when it grows past ~300 lines or develops sub-concerns.
 
@@ -51,10 +51,10 @@ Each module is one file at MVP. Split when it grows past ~300 lines or develops 
 
 | Project | Owns |
 |---|---|
-| `AlgoInvest.Cli` | Spectre.Console command tree, output formatting, settings |
-| `AlgoInvest.Client` | HTTP client (Refit or NSwag-generated) typed against engine OpenAPI |
+| `SnapdInvest.Cli` | Spectre.Console command tree, output formatting, settings |
+| `SnapdInvest.Client` | HTTP client (Refit or NSwag-generated) typed against engine OpenAPI |
 
-Tests in `cli/tests/AlgoInvest.Cli.Tests.Unit`.
+Tests in `cli/tests/SnapdInvest.Cli.Tests.Unit`.
 
 ---
 

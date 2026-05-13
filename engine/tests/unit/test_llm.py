@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.llm`."""
+"""Tests for `snapd_invest.llm`."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from algo_invest.llm import FakeLlmProvider, LlmRequest, LlmResponse
+from snapd_invest.llm import FakeLlmProvider, LlmRequest, LlmResponse
 
 
 class TestFakeLlmProvider:

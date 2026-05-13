@@ -3,6 +3,6 @@
 
 # Risk and live-trading paths require extra scrutiny.
 # When Saxo integration arrives, these patterns will trigger required review.
-/engine/src/algo_invest/risk.py     @torbenboeck
-/engine/src/algo_invest/broker.py   @torbenboeck
-/engine/src/algo_invest/execution.py @torbenboeck
+/engine/src/snapd_invest/risk.py     @torbenboeck
+/engine/src/snapd_invest/broker.py   @torbenboeck
+/engine/src/snapd_invest/execution.py @torbenboeck

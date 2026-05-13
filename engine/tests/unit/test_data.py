@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.data`."""
+"""Tests for `snapd_invest.data`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.clock import FakeClock
-from algo_invest.data import (
+from snapd_invest.clock import FakeClock
+from snapd_invest.data import (
     BarData,
     FakeMarketDataProvider,
     ensure_instrument,

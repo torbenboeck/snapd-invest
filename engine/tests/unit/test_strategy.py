@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.strategy`."""
+"""Tests for `snapd_invest.strategy`."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.clock import FakeClock
-from algo_invest.data import BarData, ensure_instrument, upsert_bars
-from algo_invest.portfolio import create_account
-from algo_invest.strategy import SMACrossoverConfig, SMACrossoverStrategy
+from snapd_invest.clock import FakeClock
+from snapd_invest.data import BarData, ensure_instrument, upsert_bars
+from snapd_invest.portfolio import create_account
+from snapd_invest.strategy import SMACrossoverConfig, SMACrossoverStrategy
 
 
 def _make_bars(symbol: str, closes: list[Decimal]) -> list[BarData]:

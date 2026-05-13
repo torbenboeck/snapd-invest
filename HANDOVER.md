@@ -44,15 +44,15 @@ These are tracked as concrete tasks in `tasks/`. See **Next steps** below.
 ```
 snapd-invest/
 ├── engine/                    Python service
-│   ├── src/algo_invest/       Flat modules
+│   ├── src/snapd_invest/       Flat modules
 │   ├── tests/unit/            One test file per module (currently ~80+ tests)
 │   ├── alembic/versions/      Migrations 0001-0003
 │   └── pyproject.toml         uv config + ruff + mypy + pytest
 ├── cli/                       .NET 10 client
-│   ├── src/AlgoInvest.Cli/    Spectre.Console host + commands
-│   ├── src/AlgoInvest.Client/ Refit interface + DTOs
+│   ├── src/SnapdInvest.Cli/    Spectre.Console host + commands
+│   ├── src/SnapdInvest.Client/ Refit interface + DTOs
 │   ├── tests/                 xUnit + Shouldly + NSubstitute
-│   ├── AlgoInvest.sln
+│   ├── SnapdInvest.sln
 │   └── Directory.Packages.props
 ├── docs/
 │   ├── ubiquitous-language.md
@@ -105,9 +105,9 @@ dotnet test                  # confirms tests pass
 cd ..
 
 # Verify end-to-end manually
-cd engine && uv run uvicorn algo_invest.api:app --port 8000  # leave running
+cd engine && uv run uvicorn snapd_invest.api:app --port 8000  # leave running
 # (another terminal)
-cd cli && dotnet run --project src/AlgoInvest.Cli -- status
+cd cli && dotnet run --project src/SnapdInvest.Cli -- status
 ```
 
 If anything in the scaffold fails on first run, **fix it before adding features**. The first concrete task is to make `make test` green.
@@ -169,7 +169,7 @@ The Cowork scaffold has not yet been verified on a real machine. Your first job 
 ```powershell
 cd engine
 uv sync                                  # install deps
-uv run alembic upgrade head              # apply migrations (creates data/algo_invest.db)
+uv run alembic upgrade head              # apply migrations (creates data/snapd_invest.db)
 uv run ruff check                        # lint
 uv run ruff format --check               # format check
 uv run mypy src                          # type check

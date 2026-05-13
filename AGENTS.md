@@ -152,7 +152,7 @@ Include the task ID in the body if there is one:
 ```
 feat(strategy): add SMA crossover strategy
 
-Implements SMACrossoverStrategy in engine/src/algo_invest/strategy.py.
+Implements SMACrossoverStrategy in engine/src/snapd_invest/strategy.py.
 Generates buy on golden cross, sell on death cross.
 
 Task: T-004

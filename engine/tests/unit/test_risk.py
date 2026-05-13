@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.risk`."""
+"""Tests for `snapd_invest.risk`."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.clock import FakeClock
-from algo_invest.data import BarData, ensure_instrument, upsert_bars
-from algo_invest.portfolio import create_account
-from algo_invest.risk import RiskConfig, SignalCandidate, evaluate
+from snapd_invest.clock import FakeClock
+from snapd_invest.data import BarData, ensure_instrument, upsert_bars
+from snapd_invest.portfolio import create_account
+from snapd_invest.risk import RiskConfig, SignalCandidate, evaluate
 
 
 def _bar(symbol: str, close: Decimal) -> BarData:

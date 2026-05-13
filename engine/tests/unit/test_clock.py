@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.clock`."""
+"""Tests for `snapd_invest.clock`."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from algo_invest.clock import FakeClock, SystemClock
+from snapd_invest.clock import FakeClock, SystemClock
 
 
 class TestSystemClock:

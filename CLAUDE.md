@@ -118,8 +118,8 @@ See [`AGENTS.md`](AGENTS.md) for the operating manual.
 | Run CLI tests | `cd cli && dotnet test` |
 | Run CLI format check | `cd cli && dotnet format --verify-no-changes` |
 | Run all tests (both stacks) | `make test` (when available) |
-| Start engine locally | `cd engine && uv run uvicorn algo_invest.api:app --reload --port 8000` |
-| Run CLI command | `cd cli && dotnet run --project src/AlgoInvest.Cli -- <command>` |
+| Start engine locally | `cd engine && uv run uvicorn snapd_invest.api:app --reload --port 8000` |
+| Run CLI command | `cd cli && dotnet run --project src/SnapdInvest.Cli -- <command>` |
 
 ---
 

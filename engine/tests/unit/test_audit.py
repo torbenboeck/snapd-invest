@@ -1,4 +1,4 @@
-"""Tests for `algo_invest.audit`."""
+"""Tests for `snapd_invest.audit`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from algo_invest.audit import list_events, record_event
-from algo_invest.clock import FakeClock
+from snapd_invest.audit import list_events, record_event
+from snapd_invest.clock import FakeClock
 
 
 class TestRecordEvent:

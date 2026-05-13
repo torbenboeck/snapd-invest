@@ -11,7 +11,7 @@ See [`CLAUDE.md`](CLAUDE.md) for full guidance.
 uv sync
 
 # Run (development)
-uv run uvicorn algo_invest.api:app --reload --port 8000
+uv run uvicorn snapd_invest.api:app --reload --port 8000
 
 # Apply DB migrations
 uv run alembic upgrade head
@@ -32,7 +32,7 @@ uv run ruff check --fix
 ## Module layout
 
 ```
-src/algo_invest/
+src/snapd_invest/
 ├── api.py              FastAPI app, routes, DI
 ├── audit.py            Event log (append-only)
 ├── clock.py            Injectable clock
