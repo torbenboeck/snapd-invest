@@ -1,3 +1,4 @@
+using System.Globalization;
 using SnapdInvest.Client;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -22,7 +23,7 @@ public sealed class StatusCommand(IEngineApi api) : AsyncCommand<StatusCommand.S
             var summaryPanel = new Panel(
                 $"[bold]Account:[/] {portfolio.AccountName} ({portfolio.BaseCurrency})\n" +
                 $"[bold]Cash:[/]    {portfolio.Cash:N2}\n" +
-                $"[bold]Equity:[/]  {(portfolio.Equity?.ToString("N2") ?? "[grey]n/a[/]")}")
+                $"[bold]Equity:[/]  {(portfolio.Equity?.ToString("N2", CultureInfo.InvariantCulture) ?? "[grey]n/a[/]")}")
             {
                 Header = new PanelHeader(" Portfolio "),
                 Border = BoxBorder.Rounded,
@@ -49,9 +50,9 @@ public sealed class StatusCommand(IEngineApi api) : AsyncCommand<StatusCommand.S
                         $"{p.InstrumentSymbol}@{p.InstrumentExchange}",
                         $"{p.Quantity:N4}",
                         $"{p.AvgCost:N2}",
-                        p.LastPrice?.ToString("N2") ?? "[grey]?[/]",
-                        p.MarketValue?.ToString("N2") ?? "[grey]?[/]",
-                        $"[{pnlColor}]{p.UnrealizedPnl?.ToString("N2") ?? "?"}[/]",
+                        p.LastPrice?.ToString("N2", CultureInfo.InvariantCulture) ?? "[grey]?[/]",
+                        p.MarketValue?.ToString("N2", CultureInfo.InvariantCulture) ?? "[grey]?[/]",
+                        $"[{pnlColor}]{p.UnrealizedPnl?.ToString("N2", CultureInfo.InvariantCulture) ?? "?"}[/]",
                         p.Tag);
                 }
 
@@ -71,7 +72,7 @@ public sealed class StatusCommand(IEngineApi api) : AsyncCommand<StatusCommand.S
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Error:[/] {ex.Message}");
+            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
             return 1;
         }
     }

@@ -3,7 +3,6 @@ using SnapdInvest.Cli.Commands;
 using SnapdInvest.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Refit;
 using Serilog;
 using Spectre.Console.Cli;

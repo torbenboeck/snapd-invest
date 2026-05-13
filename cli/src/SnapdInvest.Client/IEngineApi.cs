@@ -20,19 +20,19 @@ public interface IEngineApi
     [Get("/v1/audit")]
     Task<List<AuditEventDto>> GetAuditAsync(
         [Query] int limit = 100,
-        [AliasAs("event_type")] [Query] string? eventType = null,
+        [AliasAs("event_type")][Query] string? eventType = null,
         CancellationToken ct = default);
 
     [Post("/v1/run-once")]
     Task<RunOnceResponse> RunOnceAsync(
-        [AliasAs("instrument_symbol")] [Query] string instrumentSymbol = "AAPL",
-        [AliasAs("instrument_exchange")] [Query] string instrumentExchange = "NASDAQ",
+        [AliasAs("instrument_symbol")][Query] string instrumentSymbol = "AAPL",
+        [AliasAs("instrument_exchange")][Query] string instrumentExchange = "NASDAQ",
         CancellationToken ct = default);
 
     [Post("/v1/agents/run")]
     Task<AgentRunResponse> RunAgentAsync(
-        [AliasAs("instrument_symbol")] [Query] string instrumentSymbol = "AAPL",
-        [AliasAs("instrument_exchange")] [Query] string instrumentExchange = "NASDAQ",
+        [AliasAs("instrument_symbol")][Query] string instrumentSymbol = "AAPL",
+        [AliasAs("instrument_exchange")][Query] string instrumentExchange = "NASDAQ",
         CancellationToken ct = default);
 
     [Get("/v1/recommendations")]
