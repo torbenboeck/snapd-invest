@@ -98,6 +98,9 @@ appsettings.Development.json
 appsettings.Local.json
 **/User Secrets/
 
+# Claude Code local-only settings (per-user permission grants)
+.claude/settings.local.json
+
 # ============================================================================
 # Databases
 # ============================================================================
