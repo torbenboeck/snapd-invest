@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+# Block direct commits to protected branches.
+#
+# Activate once after clone:
+#   git config core.hooksPath scripts/git-hooks
+#   # or: make install-hooks
+#
+# Protected branches require a PR. Use feature/<task>-<slug> or
+# bugfix/<task>-<slug> branches instead.
+
+set -eu
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+
+case "$branch" in
+    main|develop|release/*)
+        echo "BLOCKED: direct commits to '$branch' are not allowed." >&2
+        echo "Create a feature/<task>-<slug> or bugfix/<task>-<slug> branch and open a PR." >&2
+        echo "" >&2
+        echo "If you really need to bypass (e.g. emergency hotfix), use:" >&2
+        echo "  git commit --no-verify" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

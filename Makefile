@@ -1,20 +1,25 @@
-.PHONY: help install test test-engine test-cli lint format dev-engine clean
+.PHONY: help install install-hooks test test-engine test-cli lint format dev-engine clean
 
 help:
 	@echo "snapd-invest — common commands"
 	@echo ""
-	@echo "  make install       Install dependencies for both stacks"
-	@echo "  make test          Run all tests (engine + CLI)"
-	@echo "  make test-engine   Run Python engine tests only"
-	@echo "  make test-cli      Run .NET CLI tests only"
-	@echo "  make lint          Run lint checks for both stacks"
-	@echo "  make format        Format code in both stacks"
-	@echo "  make dev-engine    Start the Python engine with reload"
-	@echo "  make clean         Remove build artifacts"
+	@echo "  make install         Install dependencies for both stacks"
+	@echo "  make install-hooks   Activate the repo-tracked git hooks"
+	@echo "  make test            Run all tests (engine + CLI)"
+	@echo "  make test-engine     Run Python engine tests only"
+	@echo "  make test-cli        Run .NET CLI tests only"
+	@echo "  make lint            Run lint checks for both stacks"
+	@echo "  make format          Format code in both stacks"
+	@echo "  make dev-engine      Start the Python engine with reload"
+	@echo "  make clean           Remove build artifacts"
 
-install:
+install: install-hooks
 	cd engine && uv sync
 	cd cli && dotnet restore
+
+install-hooks:
+	git config core.hooksPath scripts/git-hooks
+	@echo "Git hooks activated from scripts/git-hooks/"
 
 test: test-engine test-cli
 

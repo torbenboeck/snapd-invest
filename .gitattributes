@@ -1,0 +1,28 @@
+# Normalize line endings on commit. Working copy uses the platform default
+# unless an explicit eol is set below.
+* text=auto eol=lf
+
+# Windows-only files keep CRLF
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+*.ps1        text eol=crlf
+
+# Visual Studio solution files conventionally use CRLF
+*.sln        text eol=crlf
+
+# Binary files
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary
+*.zip        binary
+*.gz         binary
+*.tar        binary
+*.7z         binary
+*.db         binary
+*.sqlite     binary
+*.sqlite3    binary
+*.dll        binary
+*.exe        binary
