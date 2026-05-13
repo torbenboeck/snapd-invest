@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
-from snapd_invest.config import Settings
+if TYPE_CHECKING:
+    from snapd_invest.config import Settings
 
 
 def configure_logging(settings: Settings) -> None:
@@ -49,4 +50,4 @@ def configure_logging(settings: Settings) -> None:
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     """Get a bound structlog logger."""
-    return structlog.get_logger(name)
+    return cast("structlog.stdlib.BoundLogger", structlog.get_logger(name))

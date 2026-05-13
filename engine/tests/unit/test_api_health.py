@@ -24,9 +24,7 @@ class TestHealth:
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get(
-                "/v1/health", headers={"X-Correlation-Id": "test-corr-123"}
-            )
+            response = await client.get("/v1/health", headers={"X-Correlation-Id": "test-corr-123"})
 
         assert response.headers["X-Correlation-Id"] == "test-corr-123"
 

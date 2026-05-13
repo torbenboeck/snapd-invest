@@ -17,12 +17,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from snapd_invest.models import Account, Instrument
 from snapd_invest.portfolio import build_summary
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.models import Account, Instrument
 
 GateOutcome = Literal["allowed", "rejected"]
 
@@ -79,6 +81,15 @@ async def evaluate(
     summary = await build_summary(session, candidate.account)
     equity = summary.equity if summary.equity is not None else candidate.account.cash
 
+    # Cash check first: "you can't afford this" is the most actionable error.
+    # Position sizing (diversification) runs after, so insufficient_cash takes priority.
+    if candidate.side == "buy" and candidate.limit_price is not None:
+        cost = candidate.quantity * candidate.limit_price
+        if cost > candidate.account.cash:
+            return RiskDecision(
+                "rejected", f"insufficient_cash:{candidate.account.cash}_needed_{cost}"
+            )
+
     # Position sizing (only enforced for buys; sells reduce exposure)
     if candidate.side == "buy" and candidate.limit_price is not None:
         order_value = candidate.quantity * candidate.limit_price
@@ -87,14 +98,6 @@ async def evaluate(
             return RiskDecision(
                 "rejected",
                 f"position_too_large:{order_value}_max_{max_value}",
-            )
-
-    # Cash check: buys need sufficient cash (at the limit price if given)
-    if candidate.side == "buy" and candidate.limit_price is not None:
-        cost = candidate.quantity * candidate.limit_price
-        if cost > candidate.account.cash:
-            return RiskDecision(
-                "rejected", f"insufficient_cash:{candidate.account.cash}_needed_{cost}"
             )
 
     return RiskDecision("allowed")

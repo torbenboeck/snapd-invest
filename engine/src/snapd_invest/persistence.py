@@ -6,8 +6,7 @@ One shared async engine per process. Sessions are short-lived and per-request
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -16,7 +15,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-from snapd_invest.config import Settings
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from snapd_invest.config import Settings
 
 
 class Base(DeclarativeBase):

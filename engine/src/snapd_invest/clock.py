@@ -7,7 +7,7 @@ It depends on the `Clock` protocol so tests can substitute a deterministic
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 
@@ -50,7 +50,5 @@ class FakeClock:
         self._now = when.astimezone(UTC)
 
     def advance(self, *, seconds: float = 0, minutes: float = 0, hours: float = 0) -> None:
-        from datetime import timedelta
-
         delta = timedelta(seconds=seconds, minutes=minutes, hours=hours)
         self._now = self._now + delta

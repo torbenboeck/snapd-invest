@@ -10,17 +10,21 @@ micro-trader runs every minute.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from snapd_invest.clock import Clock
 from snapd_invest.models import Bar, Instrument, new_id
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import Clock
 
 
 @dataclass(slots=True, frozen=True)
@@ -88,9 +92,7 @@ async def ensure_instrument(
     tick_size: Decimal = Decimal("0.01"),
 ) -> Instrument:
     """Get or create an instrument by (symbol, exchange)."""
-    stmt = select(Instrument).where(
-        Instrument.symbol == symbol, Instrument.exchange == exchange
-    )
+    stmt = select(Instrument).where(Instrument.symbol == symbol, Instrument.exchange == exchange)
     existing = (await session.execute(stmt)).scalar_one_or_none()
     if existing is not None:
         return existing

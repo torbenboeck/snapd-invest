@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
-import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from snapd_invest.broker import OrderRequest, PaperBroker
-from snapd_invest.clock import FakeClock
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.models import Position
 from snapd_invest.portfolio import create_account
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.clock import FakeClock
 
 
 def _bar(symbol: str, ts: datetime, close: Decimal) -> BarData:
@@ -110,9 +113,7 @@ class TestPaperBrokerBuy:
         assert position.quantity == Decimal("10")
         assert position.avg_cost == Decimal("150")
 
-    async def test_buy_deducts_cash(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_buy_deducts_cash(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account, instrument = await _setup_environment(
             db_session, fake_clock, last_price=Decimal("150")
         )
@@ -173,9 +174,7 @@ class TestPaperBrokerBuy:
             ),
         )
         position = (
-            await db_session.execute(
-                select(Position).where(Position.account_id == account.id)
-            )
+            await db_session.execute(select(Position).where(Position.account_id == account.id))
         ).scalar_one()
         assert position.quantity == Decimal("20")
         assert position.avg_cost == Decimal("150")  # (10*100 + 10*200) / 20
@@ -215,15 +214,11 @@ class TestPaperBrokerSell:
             ),
         )
         position = (
-            await db_session.execute(
-                select(Position).where(Position.account_id == account.id)
-            )
+            await db_session.execute(select(Position).where(Position.account_id == account.id))
         ).scalar_one()
         assert position.quantity == Decimal("6")
 
-    async def test_sell_returns_cash(
-        self, db_session: AsyncSession, fake_clock: FakeClock
-    ) -> None:
+    async def test_sell_returns_cash(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account, instrument = await _setup_environment(
             db_session, fake_clock, last_price=Decimal("150")
         )

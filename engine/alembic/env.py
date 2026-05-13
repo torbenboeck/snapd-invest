@@ -12,9 +12,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from snapd_invest import models  # noqa: F401 - registers models with Base.metadata
 from snapd_invest.config import get_settings
 from snapd_invest.persistence import Base
-from snapd_invest import models  # noqa: F401 - registers models with Base.metadata
 
 config = context.config
 settings = get_settings()

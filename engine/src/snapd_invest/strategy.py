@@ -12,15 +12,18 @@ RSI mean-revert, etc.) land in later PRs as additional classes in this file
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
-from typing import Literal, Protocol
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from snapd_invest.data import load_recent_bars
 from snapd_invest.indicators import crossover, sma
-from snapd_invest.models import Account, Instrument
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.models import Account, Instrument
 
 SignalAction = Literal["buy", "sell", "hold"]
 
@@ -57,8 +60,7 @@ class IStrategy(Protocol):
         instrument: Instrument,
         emitted_at: datetime,
         correlation_id: str | None,
-    ) -> list[Signal]:
-        ...
+    ) -> list[Signal]: ...
 
 
 # ----------------------------------------------------------------------------
