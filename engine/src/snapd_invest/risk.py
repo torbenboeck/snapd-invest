@@ -51,16 +51,23 @@ class RiskDecision:
 
 @dataclass(slots=True, frozen=True)
 class SignalCandidate:
-    """The shape the gate consumes. Mirrors `OrderRequest` minus brokerage details."""
+    """The shape the gate consumes.
+
+    `reference_price` is the price used for risk valuation (cash + position
+    sizing). It is supplied by the emitter — bar close for strategies, last
+    observed quote for agents — and is independent of the broker-side order
+    type. A market order still goes to the broker without a limit price; the
+    risk gate just needs a valuation reference.
+    """
 
     account: Account
     instrument: Instrument
     side: Literal["buy", "sell"]
     quantity: Decimal
-    limit_price: Decimal | None
+    reference_price: Decimal | None
 
 
-async def evaluate(
+async def evaluate(  # noqa: PLR0911 — each return is one independent guard clause; flattening hurts readability
     session: AsyncSession,
     config: RiskConfig,
     candidate: SignalCandidate,
@@ -78,21 +85,25 @@ async def evaluate(
         if token not in config.instrument_allowlist:
             return RiskDecision("rejected", f"instrument_not_allowed:{token}")
 
+    # A buy without a reference price cannot be sized — fail safe rather
+    # than silently approve an unbounded position.
+    if candidate.side == "buy" and candidate.reference_price is None:
+        return RiskDecision("rejected", "missing_reference_price")
+
     summary = await build_summary(session, candidate.account)
     equity = summary.equity if summary.equity is not None else candidate.account.cash
 
     # Cash check first: "you can't afford this" is the most actionable error.
     # Position sizing (diversification) runs after, so insufficient_cash takes priority.
-    if candidate.side == "buy" and candidate.limit_price is not None:
-        cost = candidate.quantity * candidate.limit_price
+    if candidate.side == "buy" and candidate.reference_price is not None:
+        cost = candidate.quantity * candidate.reference_price
         if cost > candidate.account.cash:
             return RiskDecision(
                 "rejected", f"insufficient_cash:{candidate.account.cash}_needed_{cost}"
             )
 
-    # Position sizing (only enforced for buys; sells reduce exposure)
-    if candidate.side == "buy" and candidate.limit_price is not None:
-        order_value = candidate.quantity * candidate.limit_price
+        # Position sizing (only enforced for buys; sells reduce exposure)
+        order_value = cost
         max_value = equity * config.max_position_pct_of_equity
         if order_value > max_value:
             return RiskDecision(
