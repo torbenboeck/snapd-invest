@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -13,13 +13,15 @@ from snapd_invest.broker import PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.llm import FakeLlmProvider
 from snapd_invest.pipeline import (
+    expire_overdue_recommendations,
     parse_watchlist_entry,
     run_agent_once,
     run_microtrader_once,
 )
 from snapd_invest.portfolio import create_account
+from snapd_invest.recommendation import create_recommendation
 from snapd_invest.risk import RiskConfig
-from snapd_invest.strategy import SMACrossoverConfig
+from snapd_invest.strategy import Signal, SMACrossoverConfig
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -238,3 +240,54 @@ class TestRunAgentOnce:
 
         assert outcome.recommendation_id is None
         assert "volatile" in outcome.summary
+
+
+class TestExpireOverdueRecommendations:
+    async def test_expires_overdue_leaves_fresh(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        account = await create_account(db_session, fake_clock, name="paper")
+        instrument = await ensure_instrument(
+            db_session,
+            symbol="AAPL",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+        )
+        signal = Signal(
+            source="test",
+            account_id=account.id,
+            instrument_symbol=instrument.symbol,
+            instrument_exchange=instrument.exchange,
+            action="buy",
+            quantity=Decimal("1"),
+            conviction=Decimal("0.8"),
+            rationale="test",
+            emitted_at=fake_clock.now(),
+            correlation_id=None,
+        )
+        short = await create_recommendation(
+            db_session,
+            fake_clock,
+            agent_id="agent-1",
+            signals=[signal],
+            rationale="short",
+            ttl=timedelta(minutes=1),
+        )
+        fresh = await create_recommendation(
+            db_session,
+            fake_clock,
+            agent_id="agent-1",
+            signals=[signal],
+            rationale="fresh",
+        )
+
+        fake_clock.advance(hours=2)
+
+        expired_count = await expire_overdue_recommendations(db_session, fake_clock)
+
+        assert expired_count == 1
+        await db_session.refresh(short)
+        await db_session.refresh(fresh)
+        assert short.status == "expired"
+        assert fresh.status == "pending"

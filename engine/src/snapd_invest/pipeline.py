@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from snapd_invest.agent import CONSERVATIVE_VALUE, ensure_default_agent, run_agent
 from snapd_invest.execution import execute_signals
-from snapd_invest.recommendation import create_recommendation
+from snapd_invest.recommendation import create_recommendation, expire_overdue
 from snapd_invest.strategy import SMACrossoverStrategy
 
 if TYPE_CHECKING:
@@ -150,3 +150,16 @@ async def run_agent_once(
         summary=result.summary,
         recommendation_id=recommendation_id,
     )
+
+
+async def expire_overdue_recommendations(
+    session: AsyncSession,
+    clock: Clock,
+) -> int:
+    """Sweep pending recommendations whose deadline has passed and mark them
+    expired. Returns the number of rows expired.
+
+    Thin wrapper over `recommendation.expire_overdue`. Exists in the pipeline
+    module so the scheduler imports a single coherent surface.
+    """
+    return await expire_overdue(session, clock)
