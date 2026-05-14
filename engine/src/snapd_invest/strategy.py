@@ -33,6 +33,11 @@ class Signal:
     """A proposed action emitted by a strategy or agent.
 
     Has not been vetted by the risk gate yet.
+
+    `reference_price` is the price at which the emitter was reasoning about the
+    trade — bar close for strategies, last observed quote for agents. It is the
+    risk gate's input for valuation (cash check, position sizing). It is *not*
+    a broker constraint; market orders still go to the broker without a limit.
     """
 
     source: str
@@ -45,6 +50,7 @@ class Signal:
     rationale: str
     emitted_at: datetime
     correlation_id: str | None = None
+    reference_price: Decimal | None = None
 
 
 class IStrategy(Protocol):
@@ -138,5 +144,6 @@ class SMACrossoverStrategy:
                 rationale=rationale,
                 emitted_at=emitted_at,
                 correlation_id=correlation_id,
+                reference_price=closes[-1],
             )
         ]

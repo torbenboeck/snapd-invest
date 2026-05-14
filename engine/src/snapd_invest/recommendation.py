@@ -53,6 +53,9 @@ def _serialize_signals(signals: Sequence[Signal]) -> str:
                 "rationale": s.rationale,
                 "emitted_at": s.emitted_at.isoformat(),
                 "correlation_id": s.correlation_id,
+                "reference_price": (
+                    str(s.reference_price) if s.reference_price is not None else None
+                ),
             }
             for s in signals
         ]
@@ -73,6 +76,11 @@ def _deserialize_signals(raw: str) -> list[Signal]:
             rationale=item["rationale"],
             emitted_at=datetime.fromisoformat(item["emitted_at"]),
             correlation_id=item.get("correlation_id"),
+            reference_price=(
+                Decimal(item["reference_price"])
+                if item.get("reference_price") is not None
+                else None
+            ),
         )
         for item in data
     ]
@@ -204,6 +212,7 @@ def _apply_modifications(
                     rationale=s.rationale + " [modified by user]",
                     emitted_at=s.emitted_at,
                     correlation_id=s.correlation_id,
+                    reference_price=s.reference_price,
                 )
             )
         else:

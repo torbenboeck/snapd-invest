@@ -97,6 +97,8 @@ class TestSMACrossoverStrategy:
         assert len(signals) == 1
         assert signals[0].action == "buy"
         assert signals[0].source == "sma_crossover"
+        # Strategy must supply a reference price so the risk gate can size.
+        assert signals[0].reference_price == closes[-1]
 
     async def test_death_cross_emits_sell(
         self, db_session: AsyncSession, fake_clock: FakeClock

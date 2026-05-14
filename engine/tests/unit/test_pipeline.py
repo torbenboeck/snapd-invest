@@ -146,11 +146,9 @@ class TestRunMicroTraderOnce:
     async def test_risk_kill_switch_rejects_signal(
         self, db_session: AsyncSession, fake_clock: FakeClock
     ) -> None:
-        """Proves the risk gate is wired into the pipeline. We exercise the
-        kill_switch path because it is the only rejection branch in `risk.py`
-        that fires for market orders (`limit_price=None`). The insufficient-
-        cash and position-size checks both gate on `limit_price is not None`
-        and so don't fire for the market orders this strategy emits.
+        """Proves the risk gate is wired into the pipeline by exercising the
+        kill_switch path. Cash and position-size checks are covered directly
+        in `test_risk.py` and `test_execution.py`.
         """
         account = await create_account(
             db_session, fake_clock, name="paper", initial_cash=Decimal("100000")
