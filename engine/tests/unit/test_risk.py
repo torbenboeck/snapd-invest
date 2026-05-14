@@ -53,7 +53,7 @@ class TestRiskGate:
                 instrument=instrument,
                 side="buy",
                 quantity=Decimal("10"),
-                limit_price=Decimal("100"),
+                reference_price=Decimal("100"),
             ),
         )
         assert decision.allowed
@@ -74,7 +74,7 @@ class TestRiskGate:
                 instrument=instrument,
                 side="buy",
                 quantity=Decimal("1"),
-                limit_price=Decimal("1"),
+                reference_price=Decimal("1"),
             ),
         )
         assert not decision.allowed
@@ -95,7 +95,7 @@ class TestRiskGate:
                 instrument=instrument,
                 side="buy",
                 quantity=Decimal("0"),
-                limit_price=Decimal("1"),
+                reference_price=Decimal("1"),
             ),
         )
         assert decision.reason == "non_positive_quantity"
@@ -120,7 +120,7 @@ class TestRiskGate:
                 instrument=instrument,
                 side="buy",
                 quantity=Decimal("1"),
-                limit_price=Decimal("1"),
+                reference_price=Decimal("1"),
             ),
         )
         assert decision.reason is not None
@@ -152,11 +152,65 @@ class TestRiskGate:
                 instrument=instrument,
                 side="buy",
                 quantity=Decimal("50"),
-                limit_price=Decimal("100"),
+                reference_price=Decimal("100"),
             ),
         )
         assert decision.reason is not None
         assert "position_too_large" in decision.reason
+
+    async def test_buy_without_reference_price_rejected(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """A buy with no reference_price cannot be sized — the gate fails safe
+        rather than silently approve an unbounded position.
+        """
+        account = await create_account(
+            db_session, fake_clock, name="paper", initial_cash=Decimal("100000")
+        )
+        instrument = await ensure_instrument(
+            db_session,
+            symbol="AAPL",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+        )
+        decision = await evaluate(
+            db_session,
+            RiskConfig(),
+            SignalCandidate(
+                account=account,
+                instrument=instrument,
+                side="buy",
+                quantity=Decimal("10"),
+                reference_price=None,
+            ),
+        )
+        assert decision.reason == "missing_reference_price"
+
+    async def test_sell_without_reference_price_allowed(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """Sells reduce exposure; no reference price needed for the cash check."""
+        account = await create_account(db_session, fake_clock, name="paper")
+        instrument = await ensure_instrument(
+            db_session,
+            symbol="AAPL",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+        )
+        decision = await evaluate(
+            db_session,
+            RiskConfig(),
+            SignalCandidate(
+                account=account,
+                instrument=instrument,
+                side="sell",
+                quantity=Decimal("1"),
+                reference_price=None,
+            ),
+        )
+        assert decision.allowed
 
     async def test_insufficient_cash(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
         account = await create_account(
@@ -180,7 +234,7 @@ class TestRiskGate:
                 instrument=instrument,
                 side="buy",
                 quantity=Decimal("10"),
-                limit_price=Decimal("100"),
+                reference_price=Decimal("100"),
             ),
         )
         assert decision.reason is not None

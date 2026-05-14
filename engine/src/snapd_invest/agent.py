@@ -22,11 +22,17 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from sqlalchemy import select
 
+from snapd_invest.data import load_recent_bars
 from snapd_invest.llm import ILlmProvider, LlmRequest
 from snapd_invest.models import Account, Instrument, new_id
 from snapd_invest.models import Agent as AgentModel
 from snapd_invest.portfolio import build_summary
 from snapd_invest.strategy import Signal
+
+# Cadence at which agents read a reference price for risk valuation. Daily
+# closes are what yfinance gives us at MVP and what the risk gate's
+# position-sizing assumptions are tuned to.
+AGENT_PRICE_INTERVAL = "1d"
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -222,6 +228,14 @@ async def run_agent(
     emitted_at = clock.now()
     watchlist_keys = {f"{i.symbol}@{i.exchange}" for i in watchlist}
 
+    # Reference price per watchlist instrument — latest daily close if
+    # bar data exists. Used by the risk gate for valuation.
+    reference_prices: dict[str, Decimal] = {}
+    for i in watchlist:
+        bars = await load_recent_bars(session, instrument=i, interval=AGENT_PRICE_INTERVAL, limit=1)
+        if bars:
+            reference_prices[f"{i.symbol}@{i.exchange}"] = bars[-1].close
+
     signals: list[Signal] = []
     for raw in raw_signals:
         if not isinstance(raw, dict):
@@ -269,6 +283,7 @@ async def run_agent(
                 rationale=rationale,
                 emitted_at=emitted_at,
                 correlation_id=correlation_id,
+                reference_price=reference_prices.get(token),
             )
         )
 

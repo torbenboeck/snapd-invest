@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from snapd_invest.clock import FakeClock
 
 
-def _setup_signal(account_id: str) -> Signal:
+def _setup_signal(account_id: str, *, reference_price: Decimal | None = Decimal("150")) -> Signal:
     return Signal(
         source="test_strategy",
         account_id=account_id,
@@ -35,6 +35,7 @@ def _setup_signal(account_id: str) -> Signal:
         rationale="test reason",
         emitted_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
         correlation_id="corr-1",
+        reference_price=reference_price,
     )
 
 
@@ -132,3 +133,62 @@ class TestExecuteSignal:
         second = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
 
         assert first.order_id == second.order_id
+
+    async def test_market_buy_with_insufficient_cash_is_rejected(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """A buy that would cost more than the account holds must be rejected
+        even when the broker leg is a market order (limit_price=None). The
+        risk gate uses `Signal.reference_price` for valuation; the order
+        itself stays a market order.
+        """
+        account = await create_account(
+            db_session, fake_clock, name="paper", initial_cash=Decimal("100")
+        )
+        instrument = await ensure_instrument(
+            db_session,
+            symbol="AAPL",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+        )
+        await upsert_bars(
+            db_session,
+            instrument=instrument,
+            bars=[
+                BarData(
+                    instrument_symbol="AAPL",
+                    interval="1d",
+                    timestamp=datetime(2026, 5, 1, tzinfo=UTC),
+                    open=Decimal("150"),
+                    high=Decimal("150"),
+                    low=Decimal("150"),
+                    close=Decimal("150"),
+                    volume=Decimal("1000"),
+                )
+            ],
+            source="test",
+        )
+        broker = PaperBroker(fake_clock)
+        signal = _setup_signal(account.id)  # qty=5, reference_price=150 -> cost 750
+
+        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+
+        assert not outcome.gate_allowed
+        assert outcome.gate_reason is not None
+        assert "insufficient_cash" in outcome.gate_reason
+        assert outcome.order_id is None
+
+    async def test_buy_without_reference_price_is_rejected(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """A buy with no reference_price cannot be sized — the gate must
+        fail safe rather than silently approve."""
+        account, _ = await _seed(db_session, fake_clock, last_price=Decimal("150"))
+        broker = PaperBroker(fake_clock)
+        signal = _setup_signal(account.id, reference_price=None)
+
+        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+
+        assert not outcome.gate_allowed
+        assert outcome.gate_reason == "missing_reference_price"
