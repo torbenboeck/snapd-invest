@@ -106,7 +106,7 @@ async def execute_signal(
             instrument=instrument,
             side=signal.action,
             quantity=signal.quantity,
-            limit_price=None,
+            reference_price=signal.reference_price,
         ),
     )
     await record_event(

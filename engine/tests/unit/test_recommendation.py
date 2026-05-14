@@ -68,6 +68,7 @@ def _signal(account_id: str, quantity: Decimal = Decimal("5")) -> Signal:
         rationale="test",
         emitted_at=datetime(2026, 5, 1, tzinfo=UTC),
         correlation_id="corr-1",
+        reference_price=Decimal("100"),
     )
 
 
