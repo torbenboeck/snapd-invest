@@ -31,10 +31,13 @@ def configure_logging(settings: Settings) -> None:
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
     ]
 
     if settings.log_format == "json":
+        # JSONRenderer needs format_exc_info to serialize exceptions; the
+        # ConsoleRenderer does pretty-exception rendering itself and rejects
+        # this processor (emits UserWarning).
+        shared_processors.append(structlog.processors.format_exc_info)
         renderer: Any = structlog.processors.JSONRenderer()
     else:
         renderer = structlog.dev.ConsoleRenderer(colors=True)

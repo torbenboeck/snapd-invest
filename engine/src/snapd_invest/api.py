@@ -39,6 +39,7 @@ from snapd_invest.recommendation import (
     reject,
 )
 from snapd_invest.risk import RiskConfig
+from snapd_invest.scheduler import build_default_jobs, build_scheduler
 from snapd_invest.strategy import SMACrossoverStrategy
 
 if TYPE_CHECKING:
@@ -66,11 +67,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.broker = PaperBroker(app.state.clock)
     app.state.llm = OllamaProvider()
     app.state.risk_config = RiskConfig()
+    app.state.scheduler = None
+
+    if settings.scheduler_enabled:
+        jobs = build_default_jobs(
+            session_factory=app.state.session_factory,
+            clock=app.state.clock,
+            broker=app.state.broker,
+            llm=app.state.llm,
+            risk_config=app.state.risk_config,
+            settings=settings,
+        )
+        scheduler = build_scheduler(jobs)
+        scheduler.start()
+        app.state.scheduler = scheduler
+        log.info("scheduler_started", job_count=len(jobs))
+    else:
+        log.info("scheduler_disabled")
+
     log.info("engine_started", version=__version__, db_path=str(settings.db_path))
 
     try:
         yield
     finally:
+        if app.state.scheduler is not None:
+            app.state.scheduler.shutdown(wait=False)
+            log.info("scheduler_stopped")
         await app.state.llm.aclose()
         await engine.dispose()
         log.info("engine_stopped")
