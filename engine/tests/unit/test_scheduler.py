@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from snapd_invest.broker import PaperBroker
 from snapd_invest.config import Settings
 from snapd_invest.llm import FakeLlmProvider
 from snapd_invest.risk import RiskConfig
-from snapd_invest.scheduler import build_default_jobs
+from snapd_invest.scheduler import JobConfig, build_default_jobs, build_scheduler
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -81,3 +83,49 @@ class TestHandlerErrorIsolation:
 
         # Direct invocation — no scheduler involved. Must NOT raise.
         await microtrader_job.handler()
+
+
+class TestSchedulerIntegration:
+    async def test_scheduler_fires_handler(self) -> None:
+        """Boot a real AsyncIOScheduler with a 1-second interval and verify
+        the handler runs at least once before we shut the scheduler down."""
+        counter = {"calls": 0}
+        done = asyncio.Event()
+
+        async def handler() -> None:
+            counter["calls"] += 1
+            done.set()
+
+        scheduler = build_scheduler([JobConfig(job_id="probe", minutes=1, handler=handler)])
+        scheduler.start()
+        # Replace the 1-minute trigger with a sub-second one for test speed.
+        scheduler.reschedule_job("probe", trigger=IntervalTrigger(seconds=1))
+        try:
+            await asyncio.wait_for(done.wait(), timeout=3.0)
+        finally:
+            scheduler.shutdown(wait=False)
+
+        assert counter["calls"] >= 1
+
+    async def test_scheduler_survives_handler_exception(self) -> None:
+        """A handler that raises must not crash the scheduler — subsequent
+        ticks still fire."""
+        calls = 0
+        done_after_failure = asyncio.Event()
+
+        async def flaky_handler() -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("boom")
+            done_after_failure.set()
+
+        scheduler = build_scheduler([JobConfig(job_id="flaky", minutes=1, handler=flaky_handler)])
+        scheduler.start()
+        scheduler.reschedule_job("flaky", trigger=IntervalTrigger(seconds=1))
+        try:
+            await asyncio.wait_for(done_after_failure.wait(), timeout=4.0)
+        finally:
+            scheduler.shutdown(wait=False)
+
+        assert calls >= 2
