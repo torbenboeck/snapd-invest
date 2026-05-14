@@ -16,14 +16,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from snapd_invest.agent import CONSERVATIVE_VALUE, ensure_default_agent, run_agent
 from snapd_invest.execution import execute_signals
+from snapd_invest.recommendation import create_recommendation
 from snapd_invest.strategy import SMACrossoverStrategy
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.agent import Personality
     from snapd_invest.broker import IBroker
     from snapd_invest.clock import Clock
+    from snapd_invest.llm import ILlmProvider
     from snapd_invest.models import Account, Instrument
     from snapd_invest.risk import RiskConfig
     from snapd_invest.strategy import Signal, SMACrossoverConfig
@@ -93,4 +97,56 @@ async def run_microtrader_once(
             }
             for o in outcomes
         ],
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class AgentOutcome:
+    """Result of one agent run for one instrument."""
+
+    agent_name: str
+    summary: str
+    recommendation_id: str | None
+
+
+async def run_agent_once(
+    session: AsyncSession,
+    clock: Clock,
+    llm: ILlmProvider,
+    *,
+    account: Account,
+    instrument: Instrument,
+    personality: Personality = CONSERVATIVE_VALUE,
+    correlation_id: str | None = None,
+) -> AgentOutcome:
+    """Run one agent tick: ensure the agent exists, run it against the
+    instrument, and package any resulting signals as a Recommendation.
+
+    Does NOT commit the session — the caller owns the transaction boundary.
+    """
+    agent = await ensure_default_agent(session, clock, account=account, personality=personality)
+    result = await run_agent(
+        session,
+        clock,
+        llm,
+        agent=agent,
+        personality=personality,
+        watchlist=[instrument],
+        correlation_id=correlation_id,
+    )
+    recommendation_id: str | None = None
+    if result.signals:
+        rec = await create_recommendation(
+            session,
+            clock,
+            agent_id=agent.id,
+            signals=result.signals,
+            rationale=result.summary,
+            correlation_id=correlation_id,
+        )
+        recommendation_id = rec.id
+    return AgentOutcome(
+        agent_name=result.agent_name,
+        summary=result.summary,
+        recommendation_id=recommendation_id,
     )

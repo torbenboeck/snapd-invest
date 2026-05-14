@@ -8,9 +8,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from snapd_invest.agent import CONSERVATIVE_VALUE
 from snapd_invest.broker import PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
-from snapd_invest.pipeline import parse_watchlist_entry, run_microtrader_once
+from snapd_invest.llm import FakeLlmProvider
+from snapd_invest.pipeline import (
+    parse_watchlist_entry,
+    run_agent_once,
+    run_microtrader_once,
+)
 from snapd_invest.portfolio import create_account
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import SMACrossoverConfig
@@ -163,3 +169,72 @@ class TestRunMicroTraderOnce:
         assert len(outcome.signals) == 1
         assert outcome.execution_summaries[0]["gate_allowed"] is False
         assert outcome.execution_summaries[0]["gate_reason"] == "kill_switch_on"
+
+
+class TestRunAgentOnce:
+    async def test_creates_recommendation_when_agent_emits_signal(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        account = await create_account(db_session, fake_clock, name="paper")
+        instrument = await ensure_instrument(
+            db_session,
+            symbol="AAPL",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+        )
+        llm = FakeLlmProvider()
+        llm.enqueue_json(
+            {
+                "summary": "AAPL still undervalued.",
+                "signals": [
+                    {
+                        "instrument_symbol": "AAPL",
+                        "instrument_exchange": "NASDAQ",
+                        "action": "buy",
+                        "quantity": 5,
+                        "conviction": 0.8,
+                        "rationale": "below intrinsic value",
+                    }
+                ],
+            }
+        )
+
+        outcome = await run_agent_once(
+            db_session,
+            fake_clock,
+            llm,
+            account=account,
+            instrument=instrument,
+            personality=CONSERVATIVE_VALUE,
+        )
+
+        assert outcome.recommendation_id is not None
+        assert outcome.agent_name == CONSERVATIVE_VALUE.name
+        assert "undervalued" in outcome.summary
+
+    async def test_no_recommendation_when_agent_emits_nothing(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        account = await create_account(db_session, fake_clock, name="paper")
+        instrument = await ensure_instrument(
+            db_session,
+            symbol="AAPL",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+        )
+        llm = FakeLlmProvider()
+        llm.enqueue_json({"summary": "Skipping — too volatile.", "signals": []})
+
+        outcome = await run_agent_once(
+            db_session,
+            fake_clock,
+            llm,
+            account=account,
+            instrument=instrument,
+            personality=CONSERVATIVE_VALUE,
+        )
+
+        assert outcome.recommendation_id is None
+        assert "volatile" in outcome.summary
