@@ -4,6 +4,10 @@ Hybrid Python + .NET agentic trading platform. Single-user MVP, paper-trading on
 
 Personal preferences live in `~/.claude/CLAUDE.md` and apply automatically.
 
+**Workflow rules, branching policy, commit format, and harness conventions
+live in [`AGENTS.md`](AGENTS.md) — read it before opening a branch or PR.**
+This file (CLAUDE.md) covers product context, architecture, and principles.
+
 ---
 
 ## Product Context
@@ -47,6 +51,7 @@ When working in a subdirectory, Claude Code loads the nearest `CLAUDE.md` automa
 | Trading data persistence | **Python** (SQLite via SQLAlchemy) |
 | User-facing UX | **.NET** (`cli/`) |
 | Recommendation approval flow | **Python** owns state; .NET drives via HTTP |
+| HTTP contract between CLI and engine | **Python** defines, **.NET** consumes |
 
 Rule of thumb: if it touches money, it's Python. If it's about what the user sees, it's .NET.
 
@@ -99,7 +104,7 @@ Work items live as markdown files in `tasks/`. Each task has:
 - Test commands to verify
 
 Claude Code can pick the next task autonomously by:
-1. Reading `tasks/_next.md` (or `TaskList` if Cowork) for the next unblocked item
+1. Reading `tasks/_next.md` (or browsing `tasks/T-*.md`) for the next unblocked item
 2. Implementing
 3. Running `make test` (or the task's own test command)
 4. Committing on a feature branch
@@ -111,15 +116,29 @@ See [`AGENTS.md`](AGENTS.md) for the operating manual.
 
 ## Commands
 
+First-time setup: `make install` then `make install-hooks` (the latter activates
+the repo-tracked git pre-commit hook in `scripts/git-hooks/` that blocks direct
+commits to `main`/`develop`/`release/*`).
+
 | Action | Command |
 |---|---|
-| Run engine tests | `cd engine && uv run pytest` |
-| Run engine lint | `cd engine && uv run ruff check && uv run ruff format --check` |
-| Run CLI tests | `cd cli && dotnet test` |
-| Run CLI format check | `cd cli && dotnet format --verify-no-changes` |
-| Run all tests (both stacks) | `make test` (when available) |
-| Start engine locally | `cd engine && uv run uvicorn snapd_invest.api:app --reload --port 8000` |
-| Run CLI command | `cd cli && dotnet run --project src/SnapdInvest.Cli -- <command>` |
+| Install both stacks | `make install` |
+| Activate pre-commit hook | `make install-hooks` |
+| Run all tests | `make test` |
+| Run engine tests only | `make test-engine` |
+| Run a single Python test | `cd engine && uv run pytest -k <pattern>` |
+| Run CLI tests only | `make test-cli` |
+| Run a single .NET test | `cd cli && dotnet test --filter "FullyQualifiedName~<Name>"` |
+| Lint both stacks (no fix) | `make lint` |
+| Format both stacks | `make format` |
+| Type-check engine | `cd engine && uv run mypy src` |
+| Apply DB migrations | `cd engine && uv run alembic upgrade head` |
+| Create a migration | `cd engine && uv run alembic revision --autogenerate -m "<msg>"` |
+| Start engine (reload) | `make dev-engine` |
+| Run a CLI command | `cd cli && dotnet run --project src/SnapdInvest.Cli -- <command>` |
+
+Repo-local slash commands mirror the Makefile: `/format`, `/lint`, `/test`,
+`/status`, `/next-task` (defined in `.claude/commands/`).
 
 ---
 
@@ -142,5 +161,7 @@ Update when meaningful changes happen:
 - `docs/architecture/decision-log.md` — real architectural decisions (ADR-lite, append-only)
 - `docs/architecture/module-map.md` — module responsibilities change materially
 - `docs/product/mvp-scope.md` — MVP scope intentionally changed
+- `docs/specs/` — feature specs (input to plans)
+- `docs/plans/` — implementation plans authored before code (input to PRs)
 
 Do not make cosmetic doc edits without clear value.

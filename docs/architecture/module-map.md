@@ -42,7 +42,8 @@ Each module is one file at MVP. Split when it grows past ~300 lines or develops 
 | `llm.py` | `ILlmProvider` protocol + `OllamaProvider` + `FakeLlmProvider` | (none) |
 | `recommendation.py` | Recommendation queue and approval lifecycle | `persistence`, `audit`, `clock` |
 | `execution.py` | Order management — signals → orders, recommendations → orders | `broker`, `risk`, `audit` |
-| `scheduler.py` | APScheduler setup, job definitions | `strategy`, `agent`, `data` |
+| `pipeline.py` | Per-tick orchestration: `run_microtrader_once`, `run_agent_once`, `expire_overdue_recommendations`, `parse_watchlist_entry` | `strategy`, `execution`, `agent`, `recommendation` |
+| `scheduler.py` | APScheduler setup + `build_default_jobs` factory; closures delegate to `pipeline.py` | `pipeline`, `data`, `portfolio` |
 | `api.py` | FastAPI app, routes, dependency injection | All of the above |
 
 ---
