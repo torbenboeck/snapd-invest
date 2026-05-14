@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from snapd_invest.config import Settings
 
 
@@ -35,3 +38,32 @@ class TestSettings:
         s = Settings(_env_file=None)  # type: ignore[call-arg]
         assert s.log_level == "DEBUG"
         assert s.api_port == 9000
+
+
+def test_scheduler_defaults() -> None:
+    s = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert s.scheduler_enabled is True
+    assert s.microtrader_interval_minutes == 1
+    assert s.agent_interval_minutes == 30
+    assert s.recommendation_expire_interval_minutes == 5
+    assert s.default_account_name == "paper"
+    assert s.watchlist == ["AAPL@NASDAQ"]
+
+
+def test_scheduler_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SNAPDINVEST_SCHEDULER_ENABLED", "false")
+    monkeypatch.setenv("SNAPDINVEST_MICROTRADER_INTERVAL_MINUTES", "5")
+    monkeypatch.setenv("SNAPDINVEST_AGENT_INTERVAL_MINUTES", "15")
+    monkeypatch.setenv("SNAPDINVEST_WATCHLIST", "AAPL@NASDAQ,BTC-USD@BINANCE")
+    monkeypatch.setenv("SNAPDINVEST_DEFAULT_ACCOUNT_NAME", "sim-account")
+    s = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert s.scheduler_enabled is False
+    assert s.microtrader_interval_minutes == 5
+    assert s.agent_interval_minutes == 15
+    assert s.watchlist == ["AAPL@NASDAQ", "BTC-USD@BINANCE"]
+    assert s.default_account_name == "sim-account"
+
+
+def test_scheduler_interval_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, microtrader_interval_minutes=0)  # type: ignore[call-arg]

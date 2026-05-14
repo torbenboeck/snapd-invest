@@ -13,8 +13,11 @@ When a task is completed:
 
 ## Current backlog (priority order)
 
-1. T-001 — Saxo SIM integration
+1. T-001 — Saxo SIM integration  *(needs Saxo SIM dev-app credentials from user for the optional live SIM integration test; unit tests run without)*
 2. T-002 — Real market data via yfinance
-3. T-003 — Wire the APScheduler into FastAPI lifespan
-4. T-004 — End-to-end pipeline test
-5. T-005 — Generate the .NET client from OpenAPI via NSwag
+3. T-004 — End-to-end pipeline test
+4. T-005 — Generate the .NET client from OpenAPI via NSwag
+
+## Completed
+
+- T-003 — Wire the APScheduler into FastAPI lifespan *(2026-05-14)*
