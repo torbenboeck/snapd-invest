@@ -17,20 +17,15 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from snapd_invest import __version__
-from snapd_invest.agent import (
-    CONSERVATIVE_VALUE,
-    ensure_default_agent,
-    run_agent,
-)
 from snapd_invest.audit import list_events
 from snapd_invest.broker import PaperBroker
 from snapd_invest.clock import Clock, SystemClock
 from snapd_invest.config import Settings, get_settings
 from snapd_invest.data import ensure_instrument
-from snapd_invest.execution import execute_signals
 from snapd_invest.llm import OllamaProvider
 from snapd_invest.logging_config import configure_logging, get_logger
 from snapd_invest.persistence import make_engine, make_session_factory, session_scope
+from snapd_invest.pipeline import run_agent_once, run_microtrader_once
 from snapd_invest.portfolio import (
     build_summary,
     create_account,
@@ -39,7 +34,6 @@ from snapd_invest.portfolio import (
 from snapd_invest.recommendation import (
     SignalModification,
     approve_and_execute,
-    create_recommendation,
     get_recommendation,
     list_recommendations,
     reject,
@@ -331,18 +325,18 @@ def create_app() -> FastAPI:
             instrument_type="stock",
             currency="USD",
         )
-        strategy = SMACrossoverStrategy()
-        signals = await strategy.run(
+        outcome = await run_microtrader_once(
             session,
+            clock,
+            broker,
+            risk_config,
             account=account,
             instrument=instrument,
-            emitted_at=clock.now(),
             correlation_id=correlation_id,
         )
-        outcomes = await execute_signals(session, clock, broker, risk_config, signals)
         return RunOnceResponseDto(
             correlation_id=correlation_id,
-            strategy=strategy.name,
+            strategy=SMACrossoverStrategy.name,
             signals=[
                 SignalDto(
                     source=s.source,
@@ -353,24 +347,15 @@ def create_app() -> FastAPI:
                     conviction=s.conviction,
                     rationale=s.rationale,
                 )
-                for s in signals
+                for s in outcome.signals
             ],
-            outcomes=[
-                {
-                    "instrument": f"{o.signal.instrument_symbol}@{o.signal.instrument_exchange}",
-                    "gate_allowed": o.gate_allowed,
-                    "gate_reason": o.gate_reason,
-                    "order_id": o.order_id,
-                    "order_status": o.order_status,
-                }
-                for o in outcomes
-            ],
+            outcomes=outcome.execution_summaries,
         )
 
     # -- Agent: run-once --
 
     @app.post("/v1/agents/run", tags=["agent"])
-    async def run_agent_once(
+    async def run_agent_route(
         request: Request,
         session: Annotated[AsyncSession, Depends(session_dep)],
         clock: Annotated[Clock, Depends(clock_dep)],
@@ -391,36 +376,19 @@ def create_app() -> FastAPI:
             instrument_type="stock",
             currency="USD",
         )
-        agent = await ensure_default_agent(session, clock, account=account)
-        result = await run_agent(
+        outcome = await run_agent_once(
             session,
             clock,
             llm,
-            agent=agent,
-            personality=CONSERVATIVE_VALUE,
-            watchlist=[instrument],
-            correlation_id=correlation_id,
-        )
-        if not result.signals:
-            return {
-                "correlation_id": correlation_id,
-                "agent": result.agent_name,
-                "summary": result.summary,
-                "recommendation_id": None,
-            }
-        rec = await create_recommendation(
-            session,
-            clock,
-            agent_id=agent.id,
-            signals=result.signals,
-            rationale=result.summary,
+            account=account,
+            instrument=instrument,
             correlation_id=correlation_id,
         )
         return {
             "correlation_id": correlation_id,
-            "agent": result.agent_name,
-            "summary": result.summary,
-            "recommendation_id": rec.id,
+            "agent": outcome.agent_name,
+            "summary": outcome.summary,
+            "recommendation_id": outcome.recommendation_id,
         }
 
     # -- Recommendations --
