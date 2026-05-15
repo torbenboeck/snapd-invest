@@ -22,6 +22,7 @@ var services = new ServiceCollection();
 services.AddSingleton<IConfiguration>(configuration);
 services.Configure<EngineOptions>(configuration.GetSection(EngineOptions.SectionName));
 services.AddLogging(b => b.AddSerilog(dispose: true));
+services.AddTransient<IBrowserOpener, DefaultBrowserOpener>();
 
 services
     .AddRefitClient<IEngineApi>()
@@ -60,6 +61,15 @@ app.Configure(config =>
 
     config.AddCommand<RejectCommand>("reject")
         .WithDescription("Reject a pending recommendation.");
+
+    config.AddBranch("auth", auth =>
+    {
+        auth.AddCommand<AuthSaxoCommand>("saxo")
+            .WithDescription("Authenticate against Saxo SIM via OAuth (PKCE).");
+    });
+
+    config.AddCommand<GetAccountCommand>("get-account")
+        .WithDescription("Show account details (delegates through the engine to the configured broker).");
 });
 
 return await app.RunAsync(args);
