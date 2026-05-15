@@ -67,3 +67,43 @@ def test_scheduler_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_scheduler_interval_must_be_positive() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, microtrader_interval_minutes=0)  # type: ignore[call-arg]
+
+
+class TestSaxoSettings:
+    def test_defaults_are_none_when_env_vars_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in (
+            "SNAPDINVEST_SAXO_ENV",
+            "SNAPDINVEST_SAXO_CLIENT_ID",
+            "SNAPDINVEST_SAXO_REDIRECT_URI",
+            "SNAPDINVEST_ENCRYPTION_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.saxo_env is None
+        assert settings.saxo_client_id is None
+        assert settings.saxo_redirect_uri is None
+        assert settings.encryption_key is None
+
+    def test_reads_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SNAPDINVEST_SAXO_ENV", "sim")
+        monkeypatch.setenv("SNAPDINVEST_SAXO_CLIENT_ID", "abc123")
+        monkeypatch.setenv(
+            "SNAPDINVEST_SAXO_REDIRECT_URI",
+            "http://localhost:8000/v1/oauth/saxo/callback",
+        )
+        monkeypatch.setenv("SNAPDINVEST_ENCRYPTION_KEY", "k" * 44)
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.saxo_env == "sim"
+        assert settings.saxo_client_id == "abc123"
+        assert settings.saxo_redirect_uri == "http://localhost:8000/v1/oauth/saxo/callback"
+        assert settings.encryption_key == "k" * 44
+
+    def test_saxo_env_live_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SNAPDINVEST_SAXO_ENV", "live")
+        with pytest.raises(ValidationError, match="live"):
+            Settings(_env_file=None)  # type: ignore[call-arg]
+
+    def test_saxo_env_invalid_value_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SNAPDINVEST_SAXO_ENV", "production")
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None)  # type: ignore[call-arg]

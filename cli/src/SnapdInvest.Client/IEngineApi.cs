@@ -52,4 +52,22 @@ public interface IEngineApi
         string recId,
         [Body] RejectRequest? payload,
         CancellationToken ct = default);
+
+    [Post("/v1/oauth/saxo/start")]
+    Task<AuthorizeUrlResponse> StartSaxoOAuthAsync(
+        [AliasAs("account_id")][Query] string accountId,
+        CancellationToken ct = default);
+
+    [Get("/v1/oauth/saxo/status")]
+    Task<OAuthStatusResponse> GetSaxoOAuthStatusAsync(
+        [AliasAs("account_id")][Query] string accountId,
+        CancellationToken ct = default);
+
+    [Get("/v1/accounts/{accountId}")]
+    Task<AccountInfoResponse> GetAccountAsync(string accountId, CancellationToken ct = default);
+
+    [Post("/v1/accounts")]
+    Task<CreateAccountResponse> CreateAccountAsync(
+        [Body] CreateAccountRequest payload,
+        CancellationToken ct = default);
 }

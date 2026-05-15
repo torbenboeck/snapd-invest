@@ -11,19 +11,43 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated, Any, Literal
+from urllib.parse import urlencode
 
+import httpx
 import structlog
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import (  # noqa: TC002 — runtime needed for FastAPI get_type_hints on Annotated[AsyncSession, Depends(...)]
+    AsyncSession,
+    async_sessionmaker,
+)
 
 from snapd_invest import __version__
 from snapd_invest.audit import list_events
-from snapd_invest.broker import PaperBroker
+from snapd_invest.broker import (
+    BrokerFactory,
+    IBroker,
+    PaperBroker,
+    SaxoBroker,
+)
+from snapd_invest.broker.saxo_oauth import (
+    SIM_AUTHORIZE_URL,
+    consume_oauth_state,
+    exchange_code_for_tokens,
+    generate_pkce,
+    load_tokens,
+    persist_oauth_state,
+    store_tokens,
+)
 from snapd_invest.clock import Clock, SystemClock
 from snapd_invest.config import Settings, get_settings
+from snapd_invest.crypto import FernetCipher
 from snapd_invest.data import ensure_instrument
 from snapd_invest.llm import OllamaProvider
 from snapd_invest.logging_config import configure_logging, get_logger
+from snapd_invest.models import Account
 from snapd_invest.persistence import make_engine, make_session_factory, session_scope
 from snapd_invest.pipeline import run_agent_once, run_microtrader_once
 from snapd_invest.portfolio import (
@@ -46,7 +70,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
     from fastapi import Response
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 log: structlog.stdlib.BoundLogger = get_logger(__name__)
 
@@ -54,6 +77,45 @@ log: structlog.stdlib.BoundLogger = get_logger(__name__)
 # ----------------------------------------------------------------------------
 # Lifecycle
 # ----------------------------------------------------------------------------
+
+
+def _make_broker_factory(
+    settings: Settings,
+    clock: Clock,
+    paper_broker: PaperBroker,
+    saxo_http_client: httpx.AsyncClient,
+) -> BrokerFactory:
+    """Build the per-account broker factory.
+
+    `paper` accounts get the shared `PaperBroker`. `sim` accounts get a fresh
+    `SaxoBroker` constructed with the shared httpx client + cipher derived
+    from `SNAPDINVEST_ENCRYPTION_KEY`. `live` is hard-blocked.
+    """
+
+    def factory(account: Account) -> IBroker:
+        if account.account_type == "paper":
+            return paper_broker
+        if account.account_type == "sim":
+            if settings.saxo_client_id is None or settings.encryption_key is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "SIM account requires SNAPDINVEST_SAXO_CLIENT_ID and "
+                        "SNAPDINVEST_ENCRYPTION_KEY"
+                    ),
+                )
+            return SaxoBroker(
+                client=saxo_http_client,
+                clock=clock,
+                cipher=FernetCipher(settings.encryption_key.encode("ascii")),
+                client_id=settings.saxo_client_id,
+                account_id=account.id,
+            )
+        raise HTTPException(
+            status_code=400, detail=f"unsupported account_type: {account.account_type}"
+        )
+
+    return factory
 
 
 @asynccontextmanager
@@ -68,6 +130,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm = OllamaProvider()
     app.state.risk_config = RiskConfig()
     app.state.scheduler = None
+    app.state.saxo_http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+    app.state.broker_factory = _make_broker_factory(
+        settings, app.state.clock, app.state.broker, app.state.saxo_http_client
+    )
 
     if settings.scheduler_enabled:
         jobs = build_default_jobs(
@@ -94,6 +160,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.scheduler.shutdown(wait=False)
             log.info("scheduler_stopped")
         await app.state.llm.aclose()
+        await app.state.saxo_http_client.aclose()
         await engine.dispose()
         log.info("engine_stopped")
 
@@ -122,6 +189,14 @@ def clock_dep(request: Request) -> Clock:
 
 def broker_dep(request: Request) -> PaperBroker:
     return request.app.state.broker  # type: ignore[no-any-return]
+
+
+def saxo_http_client_dep(request: Request) -> httpx.AsyncClient:
+    return request.app.state.saxo_http_client  # type: ignore[no-any-return]
+
+
+def broker_factory_dep(request: Request) -> BrokerFactory:
+    return request.app.state.broker_factory  # type: ignore[no-any-return]
 
 
 def llm_dep(request: Request) -> OllamaProvider:
@@ -247,12 +322,59 @@ class ApproveResponseDto(BaseModel):
 ApproveRequest.model_rebuild()
 
 
+# -- OAuth + accounts --
+
+
+class AuthorizeUrlResponse(BaseModel):
+    authorize_url: str
+    state: str
+
+
+class OAuthStatusResponse(BaseModel):
+    account_id: str
+    broker: str
+    authenticated: bool
+
+
+class AccountInfoDto(BaseModel):
+    account_id: str
+    account_type: str
+    client_key: str | None = None
+    user_key: str | None = None
+    name: str | None = None
+
+
+class CreateAccountRequest(BaseModel):
+    name: str
+    account_type: Literal["paper", "sim"]
+    base_currency: str = "DKK"
+    initial_cash: Decimal = Decimal("0")
+    saxo_client_key: str | None = None
+    saxo_account_key: str | None = None
+    saxo_account_id: str | None = None
+
+
+class CreateAccountResponse(BaseModel):
+    account_id: str
+    name: str
+    account_type: str
+    base_currency: str
+    saxo_account_id: str | None = None
+
+
+_CALLBACK_HTML = """<!doctype html>
+<html><body style="font-family: system-ui">
+<h1>Auth complete</h1>
+<p>You can close this tab.</p>
+</body></html>"""
+
+
 # ----------------------------------------------------------------------------
 # App factory
 # ----------------------------------------------------------------------------
 
 
-def create_app() -> FastAPI:
+def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here intentionally
     app = FastAPI(
         title="snapd-invest engine",
         description="Hybrid agentic trading engine. Paper-only at MVP.",
@@ -498,6 +620,159 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         return {"recommendation_id": rec.id, "status": rec.status}
+
+    # -- OAuth: Saxo --
+
+    @app.post("/v1/oauth/saxo/start", response_model=AuthorizeUrlResponse, tags=["oauth"])
+    async def start_saxo_oauth(
+        session: Annotated[AsyncSession, Depends(session_dep)],
+        clock: Annotated[Clock, Depends(clock_dep)],
+        settings: Annotated[Settings, Depends(settings_dep)],
+        account_id: Annotated[str, Query()],
+    ) -> AuthorizeUrlResponse:
+        if settings.saxo_client_id is None or settings.saxo_redirect_uri is None:
+            raise HTTPException(
+                status_code=503,
+                detail="SAXO_CLIENT_ID/SAXO_REDIRECT_URI not configured",
+            )
+
+        account = (
+            await session.execute(select(Account).where(Account.id == account_id))
+        ).scalar_one_or_none()
+        if account is None:
+            raise HTTPException(status_code=404, detail=f"account_id={account_id} not found")
+
+        pkce = generate_pkce()
+        state = uuid.uuid4().hex
+        await persist_oauth_state(
+            session,
+            clock,
+            account_id=account.id,
+            broker="saxo",
+            state=state,
+            code_verifier=pkce.verifier,
+        )
+
+        query = urlencode(
+            {
+                "response_type": "code",
+                "client_id": settings.saxo_client_id,
+                "redirect_uri": settings.saxo_redirect_uri,
+                "state": state,
+                "code_challenge": pkce.challenge,
+                "code_challenge_method": "S256",
+            }
+        )
+        return AuthorizeUrlResponse(authorize_url=f"{SIM_AUTHORIZE_URL}?{query}", state=state)
+
+    @app.get("/v1/oauth/saxo/callback", response_class=HTMLResponse, tags=["oauth"])
+    async def saxo_oauth_callback(
+        code: str,
+        state: str,
+        session: Annotated[AsyncSession, Depends(session_dep)],
+        clock: Annotated[Clock, Depends(clock_dep)],
+        settings: Annotated[Settings, Depends(settings_dep)],
+        saxo_http_client: Annotated[httpx.AsyncClient, Depends(saxo_http_client_dep)],
+    ) -> HTMLResponse:
+        if (
+            settings.saxo_client_id is None
+            or settings.saxo_redirect_uri is None
+            or settings.encryption_key is None
+        ):
+            raise HTTPException(status_code=503, detail="saxo configuration incomplete")
+
+        consumed = await consume_oauth_state(session, clock, state=state)
+        if consumed is None:
+            raise HTTPException(status_code=400, detail="unknown or expired state")
+
+        tokens = await exchange_code_for_tokens(
+            saxo_http_client,
+            clock,
+            client_id=settings.saxo_client_id,
+            redirect_uri=settings.saxo_redirect_uri,
+            code=code,
+            code_verifier=consumed.code_verifier,
+        )
+        cipher = FernetCipher(settings.encryption_key.encode("ascii"))
+        await store_tokens(
+            session,
+            clock,
+            cipher,
+            account_id=consumed.account_id,
+            broker=consumed.broker,
+            tokens=tokens,
+        )
+        return HTMLResponse(_CALLBACK_HTML)
+
+    @app.get("/v1/oauth/saxo/status", response_model=OAuthStatusResponse, tags=["oauth"])
+    async def saxo_oauth_status(
+        account_id: str,
+        session: Annotated[AsyncSession, Depends(session_dep)],
+        settings: Annotated[Settings, Depends(settings_dep)],
+    ) -> OAuthStatusResponse:
+        if settings.encryption_key is None:
+            return OAuthStatusResponse(account_id=account_id, broker="saxo", authenticated=False)
+
+        cipher = FernetCipher(settings.encryption_key.encode("ascii"))
+        loaded = await load_tokens(session, cipher, account_id=account_id, broker="saxo")
+        return OAuthStatusResponse(
+            account_id=account_id,
+            broker="saxo",
+            authenticated=loaded is not None,
+        )
+
+    @app.post("/v1/accounts", response_model=CreateAccountResponse, tags=["accounts"])
+    async def create_account_route(
+        payload: CreateAccountRequest,
+        session: Annotated[AsyncSession, Depends(session_dep)],
+        clock: Annotated[Clock, Depends(clock_dep)],
+    ) -> CreateAccountResponse:
+        try:
+            account = await create_account(
+                session,
+                clock,
+                name=payload.name,
+                account_type=payload.account_type,
+                base_currency=payload.base_currency,
+                initial_cash=payload.initial_cash,
+                saxo_client_key=payload.saxo_client_key,
+                saxo_account_key=payload.saxo_account_key,
+                saxo_account_id=payload.saxo_account_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await session.commit()
+        return CreateAccountResponse(
+            account_id=account.id,
+            name=account.name,
+            account_type=account.account_type,
+            base_currency=account.base_currency,
+            saxo_account_id=account.saxo_account_id,
+        )
+
+    @app.get("/v1/accounts/{account_id}", response_model=AccountInfoDto, tags=["accounts"])
+    async def get_account_info(
+        account_id: str,
+        session: Annotated[AsyncSession, Depends(session_dep)],
+        broker_factory: Annotated[BrokerFactory, Depends(broker_factory_dep)],
+    ) -> AccountInfoDto:
+        account = (
+            await session.execute(select(Account).where(Account.id == account_id))
+        ).scalar_one_or_none()
+        if account is None:
+            raise HTTPException(status_code=404, detail="account not found")
+
+        broker = broker_factory(account)
+        if isinstance(broker, SaxoBroker):
+            info = await broker.get_account(session)
+            return AccountInfoDto(
+                account_id=account.id,
+                account_type=account.account_type,
+                client_key=info.client_key,
+                user_key=info.user_key,
+                name=info.name,
+            )
+        return AccountInfoDto(account_id=account.id, account_type=account.account_type)
 
     return app
 

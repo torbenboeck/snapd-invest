@@ -1,85 +1,33 @@
-"""Broker abstraction and the internal PaperBroker.
+"""PaperBroker — in-memory paper-trading implementation of `IBroker`.
 
-`IBroker` is the contract every execution venue implements. PaperBroker is the
-in-memory paper-trading implementation used at MVP and in tests. SaxoBroker
-arrives in a later PR.
+Fills market orders immediately at the latest bar's close price. Limit orders
+fill if the limit is "marketable" against the last price (buy: last <= limit;
+sell: last >= limit). Otherwise the order is persisted with `rejected` status.
 
-Design rules:
-- Brokers know nothing about strategies, agents, or recommendations.
-- Brokers receive `OrderRequest` value objects and return persisted `Order` +
-  resulting `Trade` rows.
-- Idempotency: brokers refuse duplicate `idempotency_key` values silently
-  (return the existing Order).
+The protocol (`IBroker`) and DTOs (`OrderRequest`, `FillResult`) live in the
+package's `__init__.py` so they can be imported without dragging PaperBroker
+internals along.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from snapd_invest.models import Account, Bar, Instrument, Order, Position, Trade, new_id
+from snapd_invest.broker import FillResult, OrderRequest
+from snapd_invest.models import Bar, Order, Position, Trade, new_id
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.clock import Clock
-
-Side = Literal["buy", "sell"]
-
-
-@dataclass(slots=True, frozen=True)
-class OrderRequest:
-    """Request to place an order. Validated by `risk.py` before reaching here."""
-
-    account: Account
-    instrument: Instrument
-    side: Side
-    quantity: Decimal
-    limit_price: Decimal | None
-    source: str  # which strategy or agent originated this
-    idempotency_key: str
-    correlation_id: str | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class FillResult:
-    """Outcome of placing an order."""
-
-    order: Order
-    trades: list[Trade]
-    was_idempotent_replay: bool
-
-
-class IBroker(Protocol):
-    """Execution venue. Implementations: PaperBroker, SaxoBroker (later)."""
-
-    async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult:
-        """Submit an order. Implementations decide fill semantics."""
-        ...
-
-    async def get_last_price(
-        self, session: AsyncSession, *, instrument: Instrument
-    ) -> Decimal | None:
-        """Best-effort last known price for the instrument. Used by paper fills."""
-        ...
-
-
-# ----------------------------------------------------------------------------
-# PaperBroker
-# ----------------------------------------------------------------------------
+    from snapd_invest.models import Instrument
 
 
 class PaperBroker:
-    """In-memory paper broker.
-
-    Fills market orders immediately at the latest bar's close price.
-    Limit orders fill if the limit is "marketable" against the last price
-    (buy: last <= limit; sell: last >= limit). Otherwise rejected with a
-    `rejected` status.
-    """
+    """In-memory paper broker."""
 
     venue_name = "paper"
 
@@ -87,7 +35,6 @@ class PaperBroker:
         self._clock = clock
 
     async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult:
-        # Idempotency check
         existing = await self._find_by_idempotency_key(session, request.idempotency_key)
         if existing is not None:
             trades_stmt = select(Trade).where(Trade.order_id == existing.id)
@@ -99,7 +46,6 @@ class PaperBroker:
             order = await self._persist_order(session, request, status="rejected")
             return FillResult(order=order, trades=[], was_idempotent_replay=False)
 
-        # Determine fill price
         fill_price: Decimal | None = last_price
         if request.limit_price is not None:
             buy_above_limit = request.side == "buy" and last_price > request.limit_price
@@ -206,7 +152,6 @@ class PaperBroker:
         else:
             new_qty = position.quantity + delta
             if request.side == "buy" and new_qty > 0:
-                # weighted average cost
                 total_cost = (position.quantity * position.avg_cost) + (
                     request.quantity * fill_price
                 )
