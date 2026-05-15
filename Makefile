@@ -1,4 +1,4 @@
-.PHONY: help install install-hooks init-keys test test-engine test-cli lint format dev-engine clean
+.PHONY: help install install-hooks init-keys test test-engine test-engine-live test-cli lint format dev-engine clean
 
 help:
 	@echo "snapd-invest — common commands"
@@ -28,6 +28,9 @@ test: test-engine test-cli
 
 test-engine:
 	cd engine && uv run pytest
+
+test-engine-live:
+	cd engine && SAXO_RUN_LIVE_TESTS=1 uv run pytest -m saxo_live -v
 
 test-cli:
 	cd cli && dotnet test
