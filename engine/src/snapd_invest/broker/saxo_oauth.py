@@ -240,3 +240,84 @@ async def load_tokens(
         access_expires_at=_as_utc(row.access_expires_at),
         refresh_expires_at=_as_utc(row.refresh_expires_at),
     )
+
+
+# ----------------------------------------------------------------------------
+# Refresh
+# ----------------------------------------------------------------------------
+
+REFRESH_BUFFER_SECONDS = 60
+
+
+async def refresh_tokens(
+    client: httpx.AsyncClient,
+    clock: Clock,
+    *,
+    client_id: str,
+    refresh_token: str,
+) -> TokenSet:
+    """Use a refresh token to obtain a fresh `TokenSet`.
+
+    Raises `BrokerAuthError` on any non-2xx response from Saxo.
+    """
+    response = await client.post(
+        SIM_TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    if response.status_code >= HTTP_BAD_REQUEST:
+        raise BrokerAuthError(
+            f"saxo token refresh failed: {response.status_code} {response.text[:200]}"
+        )
+    payload = response.json()
+    now = clock.now()
+    return TokenSet(
+        access_token=payload["access_token"],
+        refresh_token=payload["refresh_token"],
+        access_expires_at=now + timedelta(seconds=int(payload["expires_in"])),
+        refresh_expires_at=now + timedelta(seconds=int(payload["refresh_token_expires_in"])),
+    )
+
+
+async def get_active_access_token(
+    session: AsyncSession,
+    clock: Clock,
+    client: httpx.AsyncClient,
+    cipher: Cipher,
+    *,
+    client_id: str,
+    account_id: str,
+    broker: str,
+) -> str:
+    """Return a usable access token for `(account_id, broker)`.
+
+    Refreshes proactively if the stored token expires within
+    `REFRESH_BUFFER_SECONDS`. Raises `BrokerAuthError` if no tokens are
+    stored, or if a refresh attempt fails.
+    """
+    stored = await load_tokens(session, cipher, account_id=account_id, broker=broker)
+    if stored is None:
+        raise BrokerAuthError(
+            f"no stored tokens for account_id={account_id} broker={broker}; "
+            f"complete OAuth first via /v1/oauth/saxo/start"
+        )
+
+    if (stored.access_expires_at - clock.now()).total_seconds() > REFRESH_BUFFER_SECONDS:
+        return stored.access_token
+
+    fresh = await refresh_tokens(
+        client, clock, client_id=client_id, refresh_token=stored.refresh_token
+    )
+    await store_tokens(
+        session,
+        clock,
+        cipher,
+        account_id=account_id,
+        broker=broker,
+        tokens=fresh,
+    )
+    return fresh.access_token
