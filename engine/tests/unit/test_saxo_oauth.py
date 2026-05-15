@@ -22,8 +22,10 @@ from snapd_invest.broker.saxo_oauth import (
     consume_oauth_state,
     exchange_code_for_tokens,
     generate_pkce,
+    get_active_access_token,
     load_tokens,
     persist_oauth_state,
+    refresh_tokens,
     store_tokens,
 )
 from snapd_invest.crypto import FernetCipher
@@ -234,3 +236,141 @@ class TestTokenStore:
         cipher = FernetCipher(Fernet.generate_key())
         account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
         assert await load_tokens(db_session, cipher, account_id=account.id, broker="saxo") is None
+
+
+class TestRefreshTokens:
+    @respx.mock
+    async def test_refresh_returns_new_tokens(self, fake_clock: FakeClock) -> None:
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 86400,
+                    "token_type": "Bearer",
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            new = await refresh_tokens(
+                client,
+                fake_clock,
+                client_id="client-123",
+                refresh_token="old-refresh",
+            )
+
+        assert new.access_token == "new-access"
+        assert new.refresh_token == "new-refresh"
+
+    @respx.mock
+    async def test_refresh_raises_auth_error_on_failure(self, fake_clock: FakeClock) -> None:
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(400, json={"error": "invalid_grant"})
+        )
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(BrokerAuthError, match="invalid_grant"):
+                await refresh_tokens(client, fake_clock, client_id="x", refresh_token="bad")
+
+
+class TestGetActiveAccessToken:
+    @respx.mock
+    async def test_returns_stored_token_when_not_near_expiry(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=TokenSet(
+                access_token="still-good",
+                refresh_token="r1",
+                access_expires_at=fake_clock.now() + timedelta(seconds=600),
+                refresh_expires_at=fake_clock.now() + timedelta(seconds=86400),
+            ),
+        )
+
+        async with httpx.AsyncClient() as client:
+            token = await get_active_access_token(
+                db_session,
+                fake_clock,
+                client,
+                cipher,
+                client_id="client-123",
+                account_id=account.id,
+                broker="saxo",
+            )
+
+        assert token == "still-good"
+
+    @respx.mock
+    async def test_refreshes_proactively_when_within_buffer(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=TokenSet(
+                access_token="almost-expired",
+                refresh_token="r1",
+                access_expires_at=fake_clock.now() + timedelta(seconds=30),
+                refresh_expires_at=fake_clock.now() + timedelta(seconds=86400),
+            ),
+        )
+
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "fresh",
+                    "refresh_token": "r2",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 86400,
+                    "token_type": "Bearer",
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            token = await get_active_access_token(
+                db_session,
+                fake_clock,
+                client,
+                cipher,
+                client_id="client-123",
+                account_id=account.id,
+                broker="saxo",
+            )
+
+        assert token == "fresh"
+        loaded = await load_tokens(db_session, cipher, account_id=account.id, broker="saxo")
+        assert loaded is not None
+        assert loaded.access_token == "fresh"
+
+    async def test_raises_auth_error_when_no_tokens_stored(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(BrokerAuthError, match="no stored tokens"):
+                await get_active_access_token(
+                    db_session,
+                    fake_clock,
+                    client,
+                    cipher,
+                    client_id="client-123",
+                    account_id=account.id,
+                    broker="saxo",
+                )
