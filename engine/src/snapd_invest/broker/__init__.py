@@ -17,6 +17,7 @@ separate `_types.py` file.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -93,6 +94,12 @@ class IBroker(Protocol):
     ) -> Decimal | None: ...
 
 
+# Reserved for T-001-B when SaxoBroker starts placing orders. T-001-A only
+# uses it from the new `GET /v1/accounts/{id}` route, where the account_type
+# determines which broker class handles the call.
+BrokerFactory = Callable[["Account"], IBroker]
+
+
 # Imported last so the types above are already attributes of this package
 # when PaperBroker / SaxoBroker run their top-level
 # `from snapd_invest.broker import ...`.
@@ -102,6 +109,7 @@ from snapd_invest.broker.saxo import SaxoAccountInfo, SaxoBroker  # noqa: E402
 __all__ = [
     "BrokerAuthError",
     "BrokerError",
+    "BrokerFactory",
     "BrokerHttpError",
     "BrokerTimeoutError",
     "FillResult",
