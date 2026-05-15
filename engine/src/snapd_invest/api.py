@@ -344,6 +344,24 @@ class AccountInfoDto(BaseModel):
     name: str | None = None
 
 
+class CreateAccountRequest(BaseModel):
+    name: str
+    account_type: Literal["paper", "sim"]
+    base_currency: str = "DKK"
+    initial_cash: Decimal = Decimal("0")
+    saxo_client_key: str | None = None
+    saxo_account_key: str | None = None
+    saxo_account_id: str | None = None
+
+
+class CreateAccountResponse(BaseModel):
+    account_id: str
+    name: str
+    account_type: str
+    base_currency: str
+    saxo_account_id: str | None = None
+
+
 _CALLBACK_HTML = """<!doctype html>
 <html><body style="font-family: system-ui">
 <h1>Auth complete</h1>
@@ -701,6 +719,35 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
             account_id=account_id,
             broker="saxo",
             authenticated=loaded is not None,
+        )
+
+    @app.post("/v1/accounts", response_model=CreateAccountResponse, tags=["accounts"])
+    async def create_account_route(
+        payload: CreateAccountRequest,
+        session: Annotated[AsyncSession, Depends(session_dep)],
+        clock: Annotated[Clock, Depends(clock_dep)],
+    ) -> CreateAccountResponse:
+        try:
+            account = await create_account(
+                session,
+                clock,
+                name=payload.name,
+                account_type=payload.account_type,
+                base_currency=payload.base_currency,
+                initial_cash=payload.initial_cash,
+                saxo_client_key=payload.saxo_client_key,
+                saxo_account_key=payload.saxo_account_key,
+                saxo_account_id=payload.saxo_account_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await session.commit()
+        return CreateAccountResponse(
+            account_id=account.id,
+            name=account.name,
+            account_type=account.account_type,
+            base_currency=account.base_currency,
+            saxo_account_id=account.saxo_account_id,
         )
 
     @app.get("/v1/accounts/{account_id}", response_model=AccountInfoDto, tags=["accounts"])

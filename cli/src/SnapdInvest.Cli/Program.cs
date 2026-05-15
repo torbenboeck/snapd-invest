@@ -70,6 +70,9 @@ app.Configure(config =>
 
     config.AddCommand<GetAccountCommand>("get-account")
         .WithDescription("Show account details (delegates through the engine to the configured broker).");
+
+    config.AddCommand<CreateAccountCommand>("create-account")
+        .WithDescription("Create a new account row in the engine DB. Required before 'auth saxo'.");
 });
 
 return await app.RunAsync(args);

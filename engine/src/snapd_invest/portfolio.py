@@ -61,9 +61,16 @@ async def create_account(
     account_type: str = "paper",
     base_currency: str = "DKK",
     initial_cash: Decimal = Decimal("0"),
+    saxo_client_key: str | None = None,
+    saxo_account_key: str | None = None,
+    saxo_account_id: str | None = None,
 ) -> Account:
     if account_type not in {"paper", "sim", "live"}:
         raise ValueError(f"account_type must be paper|sim|live, got {account_type!r}")
+    if account_type != "sim" and (
+        saxo_client_key is not None or saxo_account_key is not None or saxo_account_id is not None
+    ):
+        raise ValueError("saxo_* fields are only valid for account_type='sim'")
     account = Account(
         id=new_id(),
         name=name,
@@ -71,6 +78,9 @@ async def create_account(
         base_currency=base_currency,
         cash=initial_cash,
         created_at=clock.now(),
+        saxo_client_key=saxo_client_key,
+        saxo_account_key=saxo_account_key,
+        saxo_account_id=saxo_account_id,
     )
     session.add(account)
     await session.flush()
