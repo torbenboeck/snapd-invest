@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using SnapdInvest.Cli;
 using SnapdInvest.Cli.Commands;
 using SnapdInvest.Client;
@@ -24,8 +26,29 @@ services.Configure<EngineOptions>(configuration.GetSection(EngineOptions.Section
 services.AddLogging(b => b.AddSerilog(dispose: true));
 services.AddTransient<IBrowserOpener, DefaultBrowserOpener>();
 
+// Engine response shape:
+// - All keys are snake_case (FastAPI / Pydantic V2 default + our DTO names).
+//   C# DTOs use PascalCase, so we need a snake_case PropertyNamingPolicy.
+// - Decimal fields (Cash, Equity, Quantity, AvgCost, …) come back as JSON
+//   strings, not numbers — Pydantic V2 serializes Decimal as string to
+//   preserve precision (e.g. {"cash": "100000.0000"}). System.Text.Json
+//   refuses string→decimal without explicit opt-in via NumberHandling.
+//
+// Without this configuration, PortfolioResponse / RecommendationDto etc.
+// throw "error deserializing the response" in production. Tests didn't
+// catch the snake_case issue because they use NSubstitute mocks; the
+// JsonSerializationTests added in this branch exercise the actual
+// serializer with both number-form and string-form decimals.
+var refitSettings = new RefitSettings(
+    new SystemTextJsonContentSerializer(new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DictionaryKeyPolicy = JsonNamingPolicy.SnakeCaseLower,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+    }));
+
 services
-    .AddRefitClient<IEngineApi>()
+    .AddRefitClient<IEngineApi>(refitSettings)
     .ConfigureHttpClient((sp, c) =>
     {
         var url = configuration[$"{EngineOptions.SectionName}:Url"] ?? "http://localhost:8000";
