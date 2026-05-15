@@ -116,7 +116,25 @@ class Bar(Base):
 
 
 class Account(Base):
-    """A logical container for cash and positions."""
+    """A logical container for cash and positions.
+
+    For `account_type='sim'`, the optional `saxo_*` columns link this row to
+    the broker-side identity captured during OAuth and (for placement) the
+    specific Saxo sub-account orders are routed into.
+
+    - `saxo_client_key`: opaque token for the Saxo Client (organization or
+      individual). Captured from `/port/v1/users/me` on first auth; used in
+      audit + debugging.
+    - `saxo_account_key`: opaque token for the specific sub-account within
+      the Client. T-001-B will need this to place orders. Backfillable from
+      `/port/v1/accounts/me` after auth.
+    - `saxo_account_id`: human-readable account number from Saxo's UI (e.g.
+      "22264911"). Not used in API calls; useful for display + linking to
+      what the user sees in the Saxo portal.
+
+    All three are nullable: a SIM account can exist before its keys are
+    known, and `paper` accounts never have them set.
+    """
 
     __tablename__ = "accounts"
 
@@ -126,6 +144,9 @@ class Account(Base):
     base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     cash: Mapped[Decimal] = mapped_column(_PRICE, nullable=False, default=Decimal("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    saxo_client_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    saxo_account_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    saxo_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class Position(Base):
@@ -225,3 +246,53 @@ class Recommendation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ----------------------------------------------------------------------------
+# OAuth (T-001-A — Saxo SIM)
+# ----------------------------------------------------------------------------
+
+
+class OAuthState(Base):
+    """Short-lived PKCE state for an in-flight OAuth handshake.
+
+    Created when the engine returns an authorize URL; consumed when the
+    browser callback hits. The `state` parameter doubles as CSRF token and
+    account demux key. Rows older than 10 minutes are stale.
+    """
+
+    __tablename__ = "oauth_state"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    broker: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    code_verifier: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OAuthToken(Base):
+    """Persisted, encrypted OAuth tokens per (account, broker).
+
+    Tokens are Fernet-encrypted in code before insertion — see
+    `snapd_invest.broker.saxo_oauth`. The DB never sees plaintext.
+    """
+
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False)
+    broker: Mapped[str] = mapped_column(String(16), nullable=False)
+    access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    access_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    refresh_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "broker", name="uq_oauth_tokens_account_broker"),
+    )

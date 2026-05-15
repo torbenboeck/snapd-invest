@@ -20,6 +20,7 @@ dependencies = [
     "httpx>=0.27",
     "yfinance>=0.2.50",
     "ccxt>=4.4",
+    "cryptography>=43.0",
 ]
 
 [dependency-groups]
@@ -121,6 +122,9 @@ addopts = [
     "--cov=snapd_invest",
     "--cov-report=term-missing",
     "--cov-report=xml",
+]
+markers = [
+    "saxo_live: requires real Saxo SIM credentials and SAXO_RUN_LIVE_TESTS=1 (deselect with -m 'not saxo_live')",
 ]
 filterwarnings = [
     "error",

@@ -1,9 +1,17 @@
 # T-001 — Saxo SIM integration
 
-**Status:** pending
+**Status:** superseded
+**Superseded by:** T-001-A (this PR — auth + `get_account`) + T-001-B (deferred — placement, idempotency, MicroTrader wiring)
 **Created:** 2026-05-12
 **Owner:** Claude Code
 **Blocked by:** —
+
+> ⚠️ **Note:** This task was drafted before OAuth research and incorrectly named
+> `client_credentials` as the grant type. Saxo does not support that flow for
+> retail developers. The corrected design is in
+> [`docs/specs/T-001A-saxo-sim-oauth-and-get-account.md`](../docs/specs/T-001A-saxo-sim-oauth-and-get-account.md)
+> and uses Authorization Code Grant + PKCE. The original acceptance criteria
+> below remain as a reference for T-001-B.
 
 ## Context
 
