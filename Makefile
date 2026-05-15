@@ -1,4 +1,4 @@
-.PHONY: help install install-hooks test test-engine test-cli lint format dev-engine clean
+.PHONY: help install install-hooks init-keys test test-engine test-cli lint format dev-engine clean
 
 help:
 	@echo "snapd-invest — common commands"
@@ -20,6 +20,9 @@ install: install-hooks
 install-hooks:
 	git config core.hooksPath scripts/git-hooks
 	@echo "Git hooks activated from scripts/git-hooks/"
+
+init-keys:
+	cd engine && uv run python -m snapd_invest.tools.init_keys
 
 test: test-engine test-cli
 
