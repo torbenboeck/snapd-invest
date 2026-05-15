@@ -8,9 +8,17 @@ import re
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+import httpx
+import pytest
+import respx
+
+from snapd_invest.broker import BrokerAuthError
 from snapd_invest.broker.saxo_oauth import (
+    SIM_TOKEN_URL,
     PkceChallenge,
+    TokenSet,
     consume_oauth_state,
+    exchange_code_for_tokens,
     generate_pkce,
     persist_oauth_state,
 )
@@ -80,3 +88,61 @@ class TestOAuthStatePersistence:
         fake_clock.advance(hours=1)
         # Expired -> treated as absent
         assert await consume_oauth_state(db_session, fake_clock, state="exp") is None
+
+
+class TestExchangeCodeForTokens:
+    @respx.mock
+    async def test_happy_path_returns_tokens(self, fake_clock: FakeClock) -> None:
+        route = respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "access-abc",
+                    "refresh_token": "refresh-xyz",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 86400,
+                    "token_type": "Bearer",
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            tokens = await exchange_code_for_tokens(
+                client,
+                fake_clock,
+                client_id="client-123",
+                redirect_uri="http://localhost:8000/cb",
+                code="auth-code-abc",
+                code_verifier="v" * 64,
+            )
+
+        assert route.called
+        raw_body = route.calls.last.request.read().decode()
+        assert "grant_type=authorization_code" in raw_body
+        assert "code=auth-code-abc" in raw_body
+        assert f"code_verifier={'v' * 64}" in raw_body
+        assert "client_id=client-123" in raw_body
+        assert "redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fcb" in raw_body
+
+        assert isinstance(tokens, TokenSet)
+        assert tokens.access_token == "access-abc"
+        assert tokens.refresh_token == "refresh-xyz"
+        assert (tokens.access_expires_at - fake_clock.now()).total_seconds() == 1200
+        assert (tokens.refresh_expires_at - fake_clock.now()).total_seconds() == 86400
+
+    @respx.mock
+    async def test_raises_auth_error_on_4xx(self, fake_clock: FakeClock) -> None:
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(400, json={"error": "invalid_grant"})
+        )
+
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(BrokerAuthError, match="invalid_grant"):
+                await exchange_code_for_tokens(
+                    client,
+                    fake_clock,
+                    client_id="x",
+                    redirect_uri="http://localhost/cb",
+                    code="bad",
+                    code_verifier="v" * 64,
+                )
