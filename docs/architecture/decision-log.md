@@ -130,6 +130,51 @@ Two stacks (Python and .NET) could each have their own database, but that introd
 
 ---
 
+## ADR-005 — Saxo OAuth: Authorization Code + PKCE
+
+**Date:** 2026-05-14
+**Status:** Accepted
+
+### Context
+
+T-001-A wires Saxo SIM as the second execution venue. Saxo OpenAPI exposes four OAuth 2.0 flows: Authorization Code Grant, Authorization Code Grant + PKCE, Implicit Flow, Certificate-Based Authentication. The original `tasks/T-001-saxo-sim-integration.md` named `client_credentials`. That flow is not supported by Saxo for retail developers; the task spec was drafted before OAuth research.
+
+### Options considered
+
+1. **Authorization Code Grant** — server-side web app. Requires `client_secret`. Works against localhost callbacks.
+2. **Authorization Code Grant + PKCE** — native / desktop app. No `client_secret`; PKCE verifier replaces it. Works against localhost callbacks. Saxo's docs explicitly endorse this for "Native applications" (RFC 7636).
+3. **Implicit Flow** — single-page app. No refresh token. Disqualifying for autonomous MicroTrader.
+4. **Certificate-Based Authentication** — "select partners upon request" only.
+
+### Decision
+
+**Authorization Code + PKCE**, with the engine acting as a "Native application" registered against the user's SIM developer account.
+
+- No `client_secret` in `.env` — PKCE removes that attack surface.
+- One-time browser-based consent at first run; refresh token persists for subsequent runs.
+- `state` parameter doubles as account demux (multi-user readiness) — one redirect URI serves N accounts.
+- Tokens encrypted at rest in `oauth_tokens` table via a `Cipher` abstraction keyed by `SNAPDINVEST_ENCRYPTION_KEY`.
+
+### Consequences
+
+**Pro:**
+- Smaller secrets footprint (no client_secret).
+- Saxo's native-app registration is the documented happy path; less likely to hit portal-side gotchas.
+- PKCE verifier per-handshake means a leaked authorization code is useless without the corresponding verifier.
+
+**Con:**
+- Requires running a local HTTP listener (the engine) to receive the callback. Acceptable — the engine already listens.
+- The Saxo developer portal defaults new apps to "Web application"; the user must select "Native application" at registration (documented gotcha).
+
+### Notes
+
+- SIM endpoints: `https://sim.logonvalidation.net/{authorize,token}`.
+- SIM API base: `https://gateway.saxobank.com/sim/openapi/`.
+- Live endpoints are explicitly NOT configured; `SNAPDINVEST_SAXO_ENV=live` is blocked by `Settings` validation and by `.claude/hooks/pre_tool_bash.py`.
+- Token TTLs (access vs refresh) will be observed at first SIM exchange and appended here.
+
+---
+
 ## How to add an entry
 
 Append a new ADR section using the next number. Format:
