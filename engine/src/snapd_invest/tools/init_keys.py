@@ -33,9 +33,7 @@ def run(env_file: Path) -> str:
                 )
 
     key = generate_key()
-    needs_separator = (
-        env_file.exists() and not env_file.read_text(encoding="utf-8").endswith("\n")
-    )
+    needs_separator = env_file.exists() and not env_file.read_text(encoding="utf-8").endswith("\n")
     separator = "\n" if needs_separator else ""
     with env_file.open("a", encoding="utf-8") as f:
         f.write(f"{separator}{ENV_VAR}={key}\n")

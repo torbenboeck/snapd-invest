@@ -84,8 +84,7 @@ class Settings(BaseSettings):
     saxo_env: str | None = Field(
         default=None,
         description=(
-            "Saxo environment selector. Only 'sim' is permitted at MVP; "
-            "'live' is hard-blocked."
+            "Saxo environment selector. Only 'sim' is permitted at MVP; 'live' is hard-blocked."
         ),
     )
     saxo_client_id: str | None = Field(
@@ -122,13 +121,10 @@ class Settings(BaseSettings):
             return None
         if v == "live":
             raise ValueError(
-                "SNAPDINVEST_SAXO_ENV=live is hard-blocked at MVP. "
-                "Use 'sim' for Saxo simulation."
+                "SNAPDINVEST_SAXO_ENV=live is hard-blocked at MVP. Use 'sim' for Saxo simulation."
             )
         if v != "sim":
-            raise ValueError(
-                f"SNAPDINVEST_SAXO_ENV must be 'sim' (or unset), got {v!r}"
-            )
+            raise ValueError(f"SNAPDINVEST_SAXO_ENV must be 'sim' (or unset), got {v!r}")
         return v
 
     @property
