@@ -365,3 +365,73 @@ class TestGetAccount:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/v1/accounts/does-not-exist")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/accounts
+# ---------------------------------------------------------------------------
+
+
+class TestCreateAccount:
+    async def test_creates_paper_account(
+        self,
+        db_engine: object,
+        fake_clock: FakeClock,
+        sim_settings: Settings,
+    ) -> None:
+        app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/v1/accounts",
+                json={
+                    "name": "paper-main",
+                    "account_type": "paper",
+                    "base_currency": "DKK",
+                    "initial_cash": "100000",
+                },
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["name"] == "paper-main"
+        assert body["account_type"] == "paper"
+        assert body["saxo_account_id"] is None
+        assert len(body["account_id"]) == 36
+
+    async def test_creates_sim_account_with_saxo_id(
+        self,
+        db_engine: object,
+        fake_clock: FakeClock,
+        sim_settings: Settings,
+    ) -> None:
+        app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/v1/accounts",
+                json={
+                    "name": "saxo-sim",
+                    "account_type": "sim",
+                    "saxo_account_id": "22264911",
+                },
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["account_type"] == "sim"
+        assert body["saxo_account_id"] == "22264911"
+
+    async def test_rejects_saxo_fields_on_paper_account(
+        self,
+        db_engine: object,
+        fake_clock: FakeClock,
+        sim_settings: Settings,
+    ) -> None:
+        app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/v1/accounts",
+                json={
+                    "name": "bad-paper",
+                    "account_type": "paper",
+                    "saxo_account_id": "22264911",
+                },
+            )
+        assert resp.status_code == 400

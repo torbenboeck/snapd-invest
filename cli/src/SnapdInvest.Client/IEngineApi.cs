@@ -65,4 +65,9 @@ public interface IEngineApi
 
     [Get("/v1/accounts/{accountId}")]
     Task<AccountInfoResponse> GetAccountAsync(string accountId, CancellationToken ct = default);
+
+    [Post("/v1/accounts")]
+    Task<CreateAccountResponse> CreateAccountAsync(
+        [Body] CreateAccountRequest payload,
+        CancellationToken ct = default);
 }

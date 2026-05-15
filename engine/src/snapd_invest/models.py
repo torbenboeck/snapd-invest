@@ -116,7 +116,25 @@ class Bar(Base):
 
 
 class Account(Base):
-    """A logical container for cash and positions."""
+    """A logical container for cash and positions.
+
+    For `account_type='sim'`, the optional `saxo_*` columns link this row to
+    the broker-side identity captured during OAuth and (for placement) the
+    specific Saxo sub-account orders are routed into.
+
+    - `saxo_client_key`: opaque token for the Saxo Client (organization or
+      individual). Captured from `/port/v1/users/me` on first auth; used in
+      audit + debugging.
+    - `saxo_account_key`: opaque token for the specific sub-account within
+      the Client. T-001-B will need this to place orders. Backfillable from
+      `/port/v1/accounts/me` after auth.
+    - `saxo_account_id`: human-readable account number from Saxo's UI (e.g.
+      "22264911"). Not used in API calls; useful for display + linking to
+      what the user sees in the Saxo portal.
+
+    All three are nullable: a SIM account can exist before its keys are
+    known, and `paper` accounts never have them set.
+    """
 
     __tablename__ = "accounts"
 
@@ -126,6 +144,9 @@ class Account(Base):
     base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     cash: Mapped[Decimal] = mapped_column(_PRICE, nullable=False, default=Decimal("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    saxo_client_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    saxo_account_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    saxo_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class Position(Base):
