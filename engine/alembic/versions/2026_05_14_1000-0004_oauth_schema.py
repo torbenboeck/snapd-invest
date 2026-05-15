@@ -52,9 +52,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "account_id", "broker", name="uq_oauth_tokens_account_broker"
-        ),
+        sa.UniqueConstraint("account_id", "broker", name="uq_oauth_tokens_account_broker"),
     )
 
 
