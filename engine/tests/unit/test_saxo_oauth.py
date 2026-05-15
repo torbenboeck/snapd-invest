@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 import respx
+from cryptography.fernet import Fernet
+from sqlalchemy import select
 
 from snapd_invest.broker import BrokerAuthError
 from snapd_invest.broker.saxo_oauth import (
@@ -20,8 +22,12 @@ from snapd_invest.broker.saxo_oauth import (
     consume_oauth_state,
     exchange_code_for_tokens,
     generate_pkce,
+    load_tokens,
     persist_oauth_state,
+    store_tokens,
 )
+from snapd_invest.crypto import FernetCipher
+from snapd_invest.models import OAuthToken
 from snapd_invest.portfolio import create_account
 
 if TYPE_CHECKING:
@@ -146,3 +152,85 @@ class TestExchangeCodeForTokens:
                     code="bad",
                     code_verifier="v" * 64,
                 )
+
+
+class TestTokenStore:
+    async def test_store_then_load_roundtrip(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        tokens = TokenSet(
+            access_token="access-abc",
+            refresh_token="refresh-xyz",
+            access_expires_at=fake_clock.now() + timedelta(seconds=1200),
+            refresh_expires_at=fake_clock.now() + timedelta(seconds=86400),
+        )
+
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=tokens,
+        )
+
+        loaded = await load_tokens(db_session, cipher, account_id=account.id, broker="saxo")
+        assert loaded is not None
+        assert loaded.access_token == "access-abc"
+        assert loaded.refresh_token == "refresh-xyz"
+        assert loaded.access_expires_at == tokens.access_expires_at
+
+        # The DB row must contain ciphertext, not plaintext
+        row = (
+            await db_session.execute(select(OAuthToken).where(OAuthToken.account_id == account.id))
+        ).scalar_one()
+        assert "access-abc" not in row.access_token_encrypted
+        assert "refresh-xyz" not in row.refresh_token_encrypted
+
+    async def test_store_overwrites_existing_tokens_for_same_account_and_broker(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        first = TokenSet(
+            "a1",
+            "r1",
+            fake_clock.now() + timedelta(seconds=600),
+            fake_clock.now() + timedelta(seconds=86400),
+        )
+        second = TokenSet(
+            "a2",
+            "r2",
+            fake_clock.now() + timedelta(seconds=1200),
+            fake_clock.now() + timedelta(seconds=86400),
+        )
+
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=first,
+        )
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=second,
+        )
+
+        loaded = await load_tokens(db_session, cipher, account_id=account.id, broker="saxo")
+        assert loaded is not None
+        assert loaded.access_token == "a2"
+
+    async def test_load_returns_none_when_no_tokens(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        assert await load_tokens(db_session, cipher, account_id=account.id, broker="saxo") is None

@@ -25,13 +25,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from snapd_invest.broker import BrokerAuthError
-from snapd_invest.models import OAuthState, new_id
+from snapd_invest.models import OAuthState, OAuthToken, new_id
 
 if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.clock import Clock
+    from snapd_invest.crypto import Cipher
 
 
 HTTP_BAD_REQUEST = 400
@@ -165,4 +166,77 @@ async def exchange_code_for_tokens(
         refresh_token=payload["refresh_token"],
         access_expires_at=now + timedelta(seconds=int(payload["expires_in"])),
         refresh_expires_at=now + timedelta(seconds=int(payload["refresh_token_expires_in"])),
+    )
+
+
+# ----------------------------------------------------------------------------
+# Token persistence (encrypted at rest)
+# ----------------------------------------------------------------------------
+
+
+async def store_tokens(
+    session: AsyncSession,
+    clock: Clock,
+    cipher: Cipher,
+    *,
+    account_id: str,
+    broker: str,
+    tokens: TokenSet,
+) -> None:
+    """Upsert encrypted tokens for `(account_id, broker)`."""
+    now = clock.now()
+    existing = (
+        await session.execute(
+            select(OAuthToken).where(
+                OAuthToken.account_id == account_id,
+                OAuthToken.broker == broker,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        row = OAuthToken(
+            id=new_id(),
+            account_id=account_id,
+            broker=broker,
+            access_token_encrypted=cipher.encrypt(tokens.access_token),
+            refresh_token_encrypted=cipher.encrypt(tokens.refresh_token),
+            access_expires_at=tokens.access_expires_at,
+            refresh_expires_at=tokens.refresh_expires_at,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+    else:
+        existing.access_token_encrypted = cipher.encrypt(tokens.access_token)
+        existing.refresh_token_encrypted = cipher.encrypt(tokens.refresh_token)
+        existing.access_expires_at = tokens.access_expires_at
+        existing.refresh_expires_at = tokens.refresh_expires_at
+        existing.updated_at = now
+    await session.flush()
+
+
+async def load_tokens(
+    session: AsyncSession,
+    cipher: Cipher,
+    *,
+    account_id: str,
+    broker: str,
+) -> TokenSet | None:
+    """Load and decrypt tokens for `(account_id, broker)`, or `None`."""
+    row = (
+        await session.execute(
+            select(OAuthToken).where(
+                OAuthToken.account_id == account_id,
+                OAuthToken.broker == broker,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return TokenSet(
+        access_token=cipher.decrypt(row.access_token_encrypted),
+        refresh_token=cipher.decrypt(row.refresh_token_encrypted),
+        access_expires_at=_as_utc(row.access_expires_at),
+        refresh_expires_at=_as_utc(row.refresh_expires_at),
     )
