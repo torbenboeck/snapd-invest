@@ -78,6 +78,35 @@ class Settings(BaseSettings):
         description="Account name the scheduled jobs operate against.",
     )
 
+    # ------------------------------------------------------------------
+    # Saxo OAuth + at-rest encryption
+    # ------------------------------------------------------------------
+    saxo_env: str | None = Field(
+        default=None,
+        description=(
+            "Saxo environment selector. Only 'sim' is permitted at MVP; "
+            "'live' is hard-blocked."
+        ),
+    )
+    saxo_client_id: str | None = Field(
+        default=None,
+        description="Saxo OAuth app key (the 'client_id' for Authorization Code + PKCE).",
+    )
+    saxo_redirect_uri: str | None = Field(
+        default=None,
+        description=(
+            "Callback URL registered with Saxo. Must match exactly, "
+            "including scheme and trailing slash."
+        ),
+    )
+    encryption_key: str | None = Field(
+        default=None,
+        description=(
+            "Fernet master key for at-rest encryption (oauth_tokens). "
+            "Generate via `make init-keys`."
+        ),
+    )
+
     @field_validator("watchlist", mode="before")
     @classmethod
     def _split_watchlist_from_string(cls, value: object) -> object:
@@ -85,6 +114,22 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [entry.strip() for entry in value.split(",") if entry.strip()]
         return value
+
+    @field_validator("saxo_env")
+    @classmethod
+    def _validate_saxo_env(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if v == "live":
+            raise ValueError(
+                "SNAPDINVEST_SAXO_ENV=live is hard-blocked at MVP. "
+                "Use 'sim' for Saxo simulation."
+            )
+        if v != "sim":
+            raise ValueError(
+                f"SNAPDINVEST_SAXO_ENV must be 'sim' (or unset), got {v!r}"
+            )
+        return v
 
     @property
     def db_url(self) -> str:
