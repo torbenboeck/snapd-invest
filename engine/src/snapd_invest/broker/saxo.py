@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from snapd_invest.broker import BrokerAuthError, BrokerHttpError, BrokerTimeoutError
+from snapd_invest.broker import (
+    BrokerAuthError,
+    BrokerHttpError,
+    BrokerTimeoutError,
+    FillResult,
+    OrderRequest,
+)
 from snapd_invest.broker.saxo_oauth import (
     get_active_access_token,
     load_tokens,
@@ -25,10 +31,13 @@ from snapd_invest.broker.saxo_oauth import (
 )
 
 if TYPE_CHECKING:
+    from decimal import Decimal
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.clock import Clock
     from snapd_invest.crypto import Cipher
+    from snapd_invest.models import Instrument
 
 SAXO_SIM_API_BASE = "https://gateway.saxobank.com/sim/openapi"
 
@@ -78,6 +87,18 @@ class SaxoBroker:
             client_key=payload["ClientKey"],
             user_key=payload["UserKey"],
             name=payload.get("Name", ""),
+        )
+
+    async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult:
+        """T-001-B will implement order placement against Saxo SIM."""
+        raise NotImplementedError("SaxoBroker.place_order arrives in T-001-B (paper-only at MVP)")
+
+    async def get_last_price(
+        self, session: AsyncSession, *, instrument: Instrument
+    ) -> Decimal | None:
+        """T-001-B will implement price fetching against Saxo SIM."""
+        raise NotImplementedError(
+            "SaxoBroker.get_last_price arrives in T-001-B (paper-only at MVP)"
         )
 
     async def _authed_get(self, session: AsyncSession, path: str) -> dict[str, Any]:
