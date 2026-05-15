@@ -172,6 +172,7 @@ T-001-A wires Saxo SIM as the second execution venue. Saxo OpenAPI exposes four 
 - SIM API base: `https://gateway.saxobank.com/sim/openapi/`.
 - Live endpoints are explicitly NOT configured; `SNAPDINVEST_SAXO_ENV=live` is blocked by `Settings` validation and by `.claude/hooks/pre_tool_bash.py`.
 - Token TTLs (access vs refresh) will be observed at first SIM exchange and appended here.
+- **Redirect URL has an unusual rule:** registered in the Saxo portal *without* a port (`http://localhost/v1/oauth/saxo/callback`), but **sent** to `/authorize` *with* the port (`http://localhost:8000/v1/oauth/saxo/callback`). Saxo's auth server matches scheme+host+path and ignores the port. Confirmed against Saxo's official C# PKCE sample. See [`docs/integrations/saxo-openapi-notes.md`](../integrations/saxo-openapi-notes.md) for the full story.
 
 ---
 

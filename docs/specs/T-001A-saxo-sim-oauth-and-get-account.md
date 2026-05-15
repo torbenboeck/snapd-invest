@@ -55,7 +55,7 @@ The original `tasks/T-001-saxo-sim-integration.md` was drafted before OAuth rese
    - **App type:** Native application (the documented gotcha — do not pick Web).
    - **Grant type:** Authorization Code + PKCE.
    - **Trade-enabled:** No. T-001-A is read-only; T-001-B revisits.
-   - **Redirect URI:** `http://localhost:8000/v1/oauth/saxo/callback` (exact match — Saxo is strict on trailing slashes).
+   - **Redirect URI (registered in the portal):** `http://localhost/v1/oauth/saxo/callback` — **no port number, must use `localhost` (not `127.0.0.1`).** Saxo's PKCE flow matches scheme+host+path and ignores the port at validation time. See [`docs/integrations/saxo-openapi-notes.md`](../integrations/saxo-openapi-notes.md#1-redirect-url-registered-without-port-sent-with-port).
 3. Copy the resulting **app key** (it is the OAuth `client_id`). PKCE has no `client_secret`.
 4. Add to `engine/.env` (gitignored):
    ```
@@ -63,6 +63,7 @@ The original `tasks/T-001-saxo-sim-integration.md` was drafted before OAuth rese
    SNAPDINVEST_SAXO_CLIENT_ID=<app key>
    SNAPDINVEST_SAXO_REDIRECT_URI=http://localhost:8000/v1/oauth/saxo/callback
    ```
+   Note the `:8000` here — the value the engine **sends** to Saxo includes the port (matching where uvicorn listens), even though the value **registered** in step 2 does not. Saxo expects exactly this asymmetry.
 5. After T-001-A merges, run `make init-keys` once to generate `SNAPDINVEST_ENCRYPTION_KEY` into `engine/.env`. (The underlying tool is `python -m snapd_invest.tools.init_keys`.) The engine refuses to start without it.
 
 ## 4. Architecture
