@@ -1,0 +1,75 @@
+"""Broker abstraction.
+
+`IBroker` is the contract every execution venue implements:
+
+- `PaperBroker` — in-memory paper-trading (`paper` accounts).
+- `SaxoBroker` — Saxo SIM (`sim` accounts). T-001-A: `get_account` only.
+
+This package owns ALL broker imports — neither strategies, agents, the risk
+gate, nor execution code should import broker-vendor SDKs directly.
+
+Module ordering: types (IBroker, OrderRequest, FillResult) are defined first,
+PaperBroker is imported last. PaperBroker imports the types from the parent
+package via the partial module Python provides during cyclic import — this
+keeps the package's public surface in `__init__.py` without forcing a
+separate `_types.py` file.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Protocol
+
+if TYPE_CHECKING:
+    from decimal import Decimal
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from snapd_invest.models import Account, Instrument, Order, Trade
+
+Side = Literal["buy", "sell"]
+
+
+@dataclass(slots=True, frozen=True)
+class OrderRequest:
+    """Request to place an order. Validated by `risk.py` before reaching here."""
+
+    account: Account
+    instrument: Instrument
+    side: Side
+    quantity: Decimal
+    limit_price: Decimal | None
+    source: str
+    idempotency_key: str
+    correlation_id: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FillResult:
+    """Outcome of placing an order."""
+
+    order: Order
+    trades: list[Trade]
+    was_idempotent_replay: bool
+
+
+class IBroker(Protocol):
+    """Execution venue."""
+
+    async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult: ...
+    async def get_last_price(
+        self, session: AsyncSession, *, instrument: Instrument
+    ) -> Decimal | None: ...
+
+
+# Imported last so the types above are already attributes of this package
+# when PaperBroker runs its top-level `from snapd_invest.broker import ...`.
+from snapd_invest.broker.paper import PaperBroker  # noqa: E402
+
+__all__ = [
+    "FillResult",
+    "IBroker",
+    "OrderRequest",
+    "PaperBroker",
+    "Side",
+]

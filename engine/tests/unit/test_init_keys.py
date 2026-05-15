@@ -19,9 +19,7 @@ class TestInitKeys:
         content = env_file.read_text(encoding="utf-8")
         assert "SNAPDINVEST_ENCRYPTION_KEY=" in content
         line = next(
-            ln
-            for ln in content.splitlines()
-            if ln.startswith("SNAPDINVEST_ENCRYPTION_KEY=")
+            ln for ln in content.splitlines() if ln.startswith("SNAPDINVEST_ENCRYPTION_KEY=")
         )
         _, _, value = line.partition("=")
         assert len(value) > 30
@@ -36,15 +34,10 @@ class TestInitKeys:
 
     def test_refuses_when_key_already_present(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            "SNAPDINVEST_ENCRYPTION_KEY=already-here\n", encoding="utf-8"
-        )
+        env_file.write_text("SNAPDINVEST_ENCRYPTION_KEY=already-here\n", encoding="utf-8")
         with pytest.raises(KeyAlreadyExistsError):
             run(env_file=env_file)
-        assert (
-            "SNAPDINVEST_ENCRYPTION_KEY=already-here"
-            in env_file.read_text(encoding="utf-8")
-        )
+        assert "SNAPDINVEST_ENCRYPTION_KEY=already-here" in env_file.read_text(encoding="utf-8")
 
     def test_generated_key_is_unique_per_invocation(self, tmp_path: Path) -> None:
         env_a = tmp_path / "a.env"

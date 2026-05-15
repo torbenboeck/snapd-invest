@@ -70,9 +70,7 @@ def test_scheduler_interval_must_be_positive() -> None:
 
 
 class TestSaxoSettings:
-    def test_defaults_are_none_when_env_vars_absent(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_defaults_are_none_when_env_vars_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for var in (
             "SNAPDINVEST_SAXO_ENV",
             "SNAPDINVEST_SAXO_CLIENT_ID",
@@ -97,10 +95,7 @@ class TestSaxoSettings:
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         assert settings.saxo_env == "sim"
         assert settings.saxo_client_id == "abc123"
-        assert (
-            settings.saxo_redirect_uri
-            == "http://localhost:8000/v1/oauth/saxo/callback"
-        )
+        assert settings.saxo_redirect_uri == "http://localhost:8000/v1/oauth/saxo/callback"
         assert settings.encryption_key == "k" * 44
 
     def test_saxo_env_live_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,9 +103,7 @@ class TestSaxoSettings:
         with pytest.raises(ValidationError, match="live"):
             Settings(_env_file=None)  # type: ignore[call-arg]
 
-    def test_saxo_env_invalid_value_rejected(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_saxo_env_invalid_value_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SNAPDINVEST_SAXO_ENV", "production")
         with pytest.raises(ValidationError):
             Settings(_env_file=None)  # type: ignore[call-arg]
