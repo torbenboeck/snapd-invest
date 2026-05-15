@@ -24,12 +24,17 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
+from snapd_invest.broker import BrokerAuthError
 from snapd_invest.models import OAuthState, new_id
 
 if TYPE_CHECKING:
+    import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.clock import Clock
+
+
+HTTP_BAD_REQUEST = 400
 
 
 def _as_utc(dt: datetime) -> datetime:
@@ -110,3 +115,54 @@ async def consume_oauth_state(
     if expired:
         return None
     return row
+
+
+# ----------------------------------------------------------------------------
+# Token exchange
+# ----------------------------------------------------------------------------
+
+
+@dataclass(slots=True, frozen=True)
+class TokenSet:
+    access_token: str
+    refresh_token: str
+    access_expires_at: datetime
+    refresh_expires_at: datetime
+
+
+async def exchange_code_for_tokens(
+    client: httpx.AsyncClient,
+    clock: Clock,
+    *,
+    client_id: str,
+    redirect_uri: str,
+    code: str,
+    code_verifier: str,
+) -> TokenSet:
+    """Exchange an authorization code for an access + refresh token pair.
+
+    Raises `BrokerAuthError` on any non-2xx response from Saxo.
+    """
+    response = await client.post(
+        SIM_TOKEN_URL,
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": code_verifier,
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    if response.status_code >= HTTP_BAD_REQUEST:
+        raise BrokerAuthError(
+            f"saxo token exchange failed: {response.status_code} {response.text[:200]}"
+        )
+    payload = response.json()
+    now = clock.now()
+    return TokenSet(
+        access_token=payload["access_token"],
+        refresh_token=payload["refresh_token"],
+        access_expires_at=now + timedelta(seconds=int(payload["expires_in"])),
+        refresh_expires_at=now + timedelta(seconds=int(payload["refresh_token_expires_in"])),
+    )
