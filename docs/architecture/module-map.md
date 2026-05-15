@@ -34,7 +34,9 @@ Each module is one file at MVP. Split when it grows past ~300 lines or develops 
 | `audit.py` | `record_event(type, payload, correlation_id)`, query helpers | `persistence`, `clock` |
 | `data.py` | Market data fetching (yfinance, ccxt) and caching | `persistence`, `clock` |
 | `indicators.py` | Pure indicator functions: `sma`, `ema`, `rsi`, `atr` | (none — pure math) |
-| `broker.py` | `IBroker` protocol, `PaperBroker`, `SaxoBroker` | `persistence`, `clock`, `audit` |
+| `broker/` | `IBroker` protocol, `PaperBroker`, `SaxoBroker`, `BrokerError` hierarchy, OAuth helpers (`saxo_oauth.py`) | `persistence`, `clock`, `audit`, `crypto`, `models` |
+| `crypto.py` | `Cipher` protocol + `FernetCipher` for at-rest encryption | (none) |
+| `tools/init_keys.py` | One-off bootstrap helper to generate `SNAPDINVEST_ENCRYPTION_KEY` | `crypto` |
 | `portfolio.py` | Position state, cash balance, P&L calculation | `persistence`, `broker` |
 | `risk.py` | Risk gate: position sizing, daily loss, kill switch | `portfolio`, `audit` |
 | `strategy.py` | Deterministic strategies (e.g. `SMACrossoverStrategy`) | `indicators`, `data`, `portfolio` |
@@ -80,6 +82,6 @@ Tests in `cli/tests/SnapdInvest.Cli.Tests.Unit`.
 - `api.py` is **the only** module that touches HTTP. Other modules are stack-agnostic.
 - `persistence.py` and `models.py` are **the only** modules that import SQLAlchemy. Business logic receives sessions via dependency injection.
 - `llm.py` is **the only** module that knows about Ollama or any specific LLM SDK.
-- `broker.py` is **the only** module that imports Saxo SDK or HTTP clients to brokers.
+- The `broker/` package is **the only** module that imports Saxo SDK or HTTP clients to brokers.
 
 If a module needs to be split, the split is along these boundary lines first.

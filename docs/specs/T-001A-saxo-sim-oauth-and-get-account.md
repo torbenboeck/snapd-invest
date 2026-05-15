@@ -24,11 +24,11 @@ The original `tasks/T-001-saxo-sim-integration.md` was drafted before OAuth rese
 
 - Authorization Code + PKCE handshake against `https://sim.logonvalidation.net/{authorize,token}`.
 - Refresh-token persistence (encrypted at rest) with proactive + reactive refresh.
-- `Cipher` protocol + `FernetCipher` default implementation, keyed by `SNAPD_ENCRYPTION_KEY`.
-- New CLI command `snapd-invest init-keys` to generate the master key once.
+- `Cipher` protocol + `FernetCipher` default implementation, keyed by `SNAPDINVEST_ENCRYPTION_KEY`.
+- New `make init-keys` target (wraps `python -m snapd_invest.tools.init_keys`) to generate the master key once.
 - `SaxoBroker` class implementing `IBroker`, with only `get_account()` wired end-to-end.
 - Broker selection by `Account.account_type` (`paper` → `PaperBroker`, `sim` → `SaxoBroker`, `live` blocked).
-- `Settings` extended with `SAXO_ENV`, `SAXO_CLIENT_ID`, `SAXO_REDIRECT_URI`, `SNAPD_ENCRYPTION_KEY`.
+- `Settings` extended with `SNAPDINVEST_SAXO_ENV`, `SNAPDINVEST_SAXO_CLIENT_ID`, `SNAPDINVEST_SAXO_REDIRECT_URI`, `SNAPDINVEST_ENCRYPTION_KEY`.
 - Engine routes: `POST /v1/oauth/saxo/start` (state-changing), `GET /v1/oauth/saxo/callback` (browser redirect target), `GET /v1/oauth/saxo/status` (read).
 - CLI commands: `snapd-invest auth saxo --account <id>` (opens browser), `snapd-invest get-account`.
 - `broker.py` refactored into a `broker/` package: `__init__.py`, `paper.py`, `saxo.py`, `saxo_oauth.py`.
@@ -59,11 +59,11 @@ The original `tasks/T-001-saxo-sim-integration.md` was drafted before OAuth rese
 3. Copy the resulting **app key** (it is the OAuth `client_id`). PKCE has no `client_secret`.
 4. Add to `engine/.env` (gitignored):
    ```
-   SAXO_ENV=sim
-   SAXO_CLIENT_ID=<app key>
-   SAXO_REDIRECT_URI=http://localhost:8000/v1/oauth/saxo/callback
+   SNAPDINVEST_SAXO_ENV=sim
+   SNAPDINVEST_SAXO_CLIENT_ID=<app key>
+   SNAPDINVEST_SAXO_REDIRECT_URI=http://localhost:8000/v1/oauth/saxo/callback
    ```
-5. After T-001-A merges, run `snapd-invest init-keys` once to generate `SNAPD_ENCRYPTION_KEY` into `.env`. The engine refuses to start without it.
+5. After T-001-A merges, run `make init-keys` once to generate `SNAPDINVEST_ENCRYPTION_KEY` into `engine/.env`. (The underlying tool is `python -m snapd_invest.tools.init_keys`.) The engine refuses to start without it.
 
 ## 4. Architecture
 
@@ -176,11 +176,11 @@ class FernetCipher:
     # uses cryptography.fernet.Fernet
 ```
 
-Single-tenant today: one `FernetCipher` instance constructed from `SNAPD_ENCRYPTION_KEY`, injected into the `oauth_tokens` service functions.
+Single-tenant today: one `FernetCipher` instance constructed from `SNAPDINVEST_ENCRYPTION_KEY`, injected into the `oauth_tokens` service functions.
 
 Multi-tenant tomorrow: a `KeyProvider` adds a layer — `FernetCipher(KmsKeyProvider(account_id).fetch())` — without schema or service-function changes.
 
-`init-keys` CLI command generates a key via `Fernet.generate_key()`, writes it to `.env`, refuses to overwrite if one already exists.
+`make init-keys` (wrapping `python -m snapd_invest.tools.init_keys`) generates a key via `Fernet.generate_key()`, writes it to `engine/.env`, refuses to overwrite if one already exists.
 
 ### 4.6 Multi-user readiness summary
 
@@ -210,7 +210,7 @@ Multi-tenant tomorrow: a `KeyProvider` adds a layer — `FernetCipher(KmsKeyProv
 - [ ] Reactive refresh fires on a 401 and retries the original call exactly once.
 - [ ] `snapd-invest auth saxo` opens the browser, completes consent, returns "tokens stored".
 - [ ] `snapd-invest get-account` prints the account ID and cash from real SIM.
-- [ ] Engine refuses to start if `SNAPD_ENCRYPTION_KEY` is missing or malformed.
+- [ ] Engine refuses to start if `SNAPDINVEST_ENCRYPTION_KEY` is missing or malformed.
 - [ ] `SAXO_ENV=live` is hard-blocked by `Settings` validation.
 - [ ] All unit tests pass; coverage targets met.
 - [ ] `make test`, `make lint`, `cd engine && uv run mypy src` all clean.

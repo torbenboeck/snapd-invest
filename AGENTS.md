@@ -170,6 +170,24 @@ Custom slash commands live in `.claude/commands/`. Use them; do not duplicate th
 
 ---
 
+## Running SIM-live tests
+
+Most tests run as part of `make test`. The Saxo SIM-live integration test is
+excluded by the `saxo_live` pytest marker and never runs in CI. To run it
+locally after completing the OAuth setup (see
+`docs/specs/T-001A-saxo-sim-oauth-and-get-account.md`):
+
+```bash
+cd engine
+SAXO_RUN_LIVE_TESTS=1 uv run pytest -m saxo_live -v
+```
+
+This hits real Saxo SIM. Never set `SAXO_RUN_LIVE_TESTS=1` in CI or any
+shared environment. The `make test-engine-live` target wraps this for
+convenience.
+
+---
+
 ## When in doubt
 
 Ask. The user prefers being asked once over fixing a mess afterward.
