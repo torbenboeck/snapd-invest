@@ -225,3 +225,53 @@ class Recommendation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ----------------------------------------------------------------------------
+# OAuth (T-001-A — Saxo SIM)
+# ----------------------------------------------------------------------------
+
+
+class OAuthState(Base):
+    """Short-lived PKCE state for an in-flight OAuth handshake.
+
+    Created when the engine returns an authorize URL; consumed when the
+    browser callback hits. The `state` parameter doubles as CSRF token and
+    account demux key. Rows older than 10 minutes are stale.
+    """
+
+    __tablename__ = "oauth_state"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    broker: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    code_verifier: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OAuthToken(Base):
+    """Persisted, encrypted OAuth tokens per (account, broker).
+
+    Tokens are Fernet-encrypted in code before insertion — see
+    `snapd_invest.broker.saxo_oauth`. The DB never sees plaintext.
+    """
+
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False)
+    broker: Mapped[str] = mapped_column(String(16), nullable=False)
+    access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    access_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    refresh_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "broker", name="uq_oauth_tokens_account_broker"),
+    )
