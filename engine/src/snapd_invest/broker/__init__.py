@@ -30,6 +30,37 @@ if TYPE_CHECKING:
 Side = Literal["buy", "sell"]
 
 
+# ----------------------------------------------------------------------------
+# Errors
+# ----------------------------------------------------------------------------
+
+
+class BrokerError(Exception):
+    """Base class for all broker-layer failures."""
+
+
+class BrokerAuthError(BrokerError):
+    """OAuth token problem — missing, expired, or refresh failed."""
+
+
+class BrokerHttpError(BrokerError):
+    """Broker returned an HTTP error (4xx / 5xx)."""
+
+    def __init__(self, status_code: int, body: str) -> None:
+        super().__init__(f"broker HTTP {status_code}: {body[:200]}")
+        self.status_code = status_code
+        self.body = body
+
+
+class BrokerTimeoutError(BrokerError):
+    """Broker call timed out."""
+
+
+# ----------------------------------------------------------------------------
+# Protocol + DTOs
+# ----------------------------------------------------------------------------
+
+
 @dataclass(slots=True, frozen=True)
 class OrderRequest:
     """Request to place an order. Validated by `risk.py` before reaching here."""
@@ -67,6 +98,10 @@ class IBroker(Protocol):
 from snapd_invest.broker.paper import PaperBroker  # noqa: E402
 
 __all__ = [
+    "BrokerAuthError",
+    "BrokerError",
+    "BrokerHttpError",
+    "BrokerTimeoutError",
     "FillResult",
     "IBroker",
     "OrderRequest",
