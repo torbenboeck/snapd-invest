@@ -94,8 +94,10 @@ class IBroker(Protocol):
 
 
 # Imported last so the types above are already attributes of this package
-# when PaperBroker runs its top-level `from snapd_invest.broker import ...`.
+# when PaperBroker / SaxoBroker run their top-level
+# `from snapd_invest.broker import ...`.
 from snapd_invest.broker.paper import PaperBroker  # noqa: E402
+from snapd_invest.broker.saxo import SaxoAccountInfo, SaxoBroker  # noqa: E402
 
 __all__ = [
     "BrokerAuthError",
@@ -106,5 +108,7 @@ __all__ = [
     "IBroker",
     "OrderRequest",
     "PaperBroker",
+    "SaxoAccountInfo",
+    "SaxoBroker",
     "Side",
 ]
