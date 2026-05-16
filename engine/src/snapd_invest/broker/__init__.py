@@ -8,11 +8,11 @@
 This package owns ALL broker imports — neither strategies, agents, the risk
 gate, nor execution code should import broker-vendor SDKs directly.
 
-Module ordering: types (IBroker, OrderRequest, FillResult) are defined first,
-PaperBroker is imported last. PaperBroker imports the types from the parent
-package via the partial module Python provides during cyclic import — this
-keeps the package's public surface in `__init__.py` without forcing a
-separate `_types.py` file.
+Module ordering: types (IBroker, OrderRequest, OrderResult) are defined
+first, PaperBroker is imported last. PaperBroker imports the types from the
+parent package via the partial module Python provides during cyclic import
+— this keeps the package's public surface in `__init__.py` without forcing
+a separate `_types.py` file.
 """
 
 from __future__ import annotations
@@ -76,21 +76,11 @@ class OrderRequest:
     correlation_id: str | None = None
 
 
-@dataclass(slots=True, frozen=True)
-class FillResult:
-    """Outcome of placing an order."""
-
-    order: Order
-    trades: list[Trade]
-    was_idempotent_replay: bool
-
-
 # ----------------------------------------------------------------------------
 # OrderResult — typed discriminated union (ADR-006)
 #
-# Replaces FillResult for placement outcomes. Variants are tagged with a
-# `kind` Literal so call sites can pattern-match with `match` +
-# `typing.assert_never` for compiler-enforced exhaustiveness.
+# Variants are tagged with a `kind` Literal so call sites can pattern-match
+# with `match` + `typing.assert_never` for compiler-enforced exhaustiveness.
 # ----------------------------------------------------------------------------
 
 
@@ -146,7 +136,7 @@ OrderResult = Filled | PartiallyFilled | Rejected | BrokerDown | IdempotentRepla
 class IBroker(Protocol):
     """Execution venue."""
 
-    async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult: ...
+    async def place_order(self, session: AsyncSession, request: OrderRequest) -> OrderResult: ...
     async def get_last_price(
         self, session: AsyncSession, *, instrument: Instrument
     ) -> Decimal | None: ...
@@ -171,7 +161,6 @@ __all__ = [
     "BrokerFactory",
     "BrokerHttpError",
     "BrokerTimeoutError",
-    "FillResult",
     "Filled",
     "IBroker",
     "IdempotentReplay",

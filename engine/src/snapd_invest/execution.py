@@ -18,7 +18,15 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from snapd_invest.audit import record_event
-from snapd_invest.broker import IBroker, OrderRequest
+from snapd_invest.broker import (
+    BrokerDown,
+    Filled,
+    IBroker,
+    IdempotentReplay,
+    OrderRequest,
+    PartiallyFilled,
+    Rejected,
+)
 from snapd_invest.models import Account, Instrument
 from snapd_invest.risk import RiskConfig, SignalCandidate, evaluate
 
@@ -144,25 +152,63 @@ async def execute_signal(
             correlation_id=signal.correlation_id,
         ),
     )
+
+    if isinstance(result, Filled | PartiallyFilled | IdempotentReplay):
+        await record_event(
+            session,
+            clock,
+            event_type="order_placed",
+            correlation_id=signal.correlation_id,
+            payload={
+                "order_id": result.order.id,
+                "status": result.order.status,
+                "kind": result.kind,
+                "trade_count": len(result.trades),
+            },
+        )
+        return ExecutionOutcome(
+            signal=signal,
+            gate_allowed=True,
+            gate_reason=None,
+            order_id=result.order.id,
+            order_status=result.order.status,
+        )
+
+    if isinstance(result, Rejected):
+        await record_event(
+            session,
+            clock,
+            event_type="order_rejected",
+            correlation_id=signal.correlation_id,
+            payload={
+                "kind": result.kind,
+                "reason": result.reason,
+                "saxo_error_code": result.saxo_error_code,
+            },
+        )
+        return ExecutionOutcome(
+            signal=signal,
+            gate_allowed=True,
+            gate_reason=None,
+            order_id=None,
+            order_status="rejected",
+        )
+
+    # BrokerDown
+    assert isinstance(result, BrokerDown)
     await record_event(
         session,
         clock,
-        event_type="order_placed",
+        event_type="broker_down",
         correlation_id=signal.correlation_id,
-        payload={
-            "order_id": result.order.id,
-            "status": result.order.status,
-            "idempotent_replay": result.was_idempotent_replay,
-            "trade_count": len(result.trades),
-        },
+        payload={"kind": result.kind, "detail": result.detail},
     )
-
     return ExecutionOutcome(
         signal=signal,
         gate_allowed=True,
         gate_reason=None,
-        order_id=result.order.id,
-        order_status=result.order.status,
+        order_id=None,
+        order_status="broker_down",
     )
 
 
