@@ -18,7 +18,6 @@ import structlog
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (  # noqa: TC002 — runtime needed for FastAPI get_type_hints on Annotated[AsyncSession, Depends(...)]
     AsyncSession,
     async_sessionmaker,
@@ -48,12 +47,12 @@ from snapd_invest.crypto import FernetCipher
 from snapd_invest.data import ensure_instrument
 from snapd_invest.llm import OllamaProvider
 from snapd_invest.logging_config import configure_logging, get_logger
-from snapd_invest.models import Account
 from snapd_invest.persistence import make_engine, make_session_factory, session_scope
 from snapd_invest.pipeline import run_agent_once, run_microtrader_once
 from snapd_invest.portfolio import (
     build_summary,
     create_account,
+    get_account_by_id,
     get_account_by_name,
 )
 from snapd_invest.recommendation import (
@@ -71,6 +70,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
     from fastapi import Response
+
+    from snapd_invest.models import Account
 
 log: structlog.stdlib.BoundLogger = get_logger(__name__)
 
@@ -637,9 +638,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
                 detail="SAXO_CLIENT_ID/SAXO_REDIRECT_URI not configured",
             )
 
-        account = (
-            await session.execute(select(Account).where(Account.id == account_id))
-        ).scalar_one_or_none()
+        account = await get_account_by_id(session, account_id)
         if account is None:
             raise HTTPException(status_code=404, detail=f"account_id={account_id} not found")
 
@@ -757,9 +756,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         session: Annotated[AsyncSession, Depends(session_dep)],
         broker_factory: Annotated[BrokerFactory, Depends(broker_factory_dep)],
     ) -> AccountInfoDto:
-        account = (
-            await session.execute(select(Account).where(Account.id == account_id))
-        ).scalar_one_or_none()
+        account = await get_account_by_id(session, account_id)
         if account is None:
             raise HTTPException(status_code=404, detail="account not found")
 
