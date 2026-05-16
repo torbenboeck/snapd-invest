@@ -18,7 +18,7 @@ separate `_types.py` file.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
@@ -85,6 +85,64 @@ class FillResult:
     was_idempotent_replay: bool
 
 
+# ----------------------------------------------------------------------------
+# OrderResult — typed discriminated union (ADR-006)
+#
+# Replaces FillResult for placement outcomes. Variants are tagged with a
+# `kind` Literal so call sites can pattern-match with `match` +
+# `typing.assert_never` for compiler-enforced exhaustiveness.
+# ----------------------------------------------------------------------------
+
+
+@dataclass(slots=True, frozen=True)
+class Filled:
+    """Order was fully filled."""
+
+    order: Order
+    trades: list[Trade] = field(default_factory=list)
+    kind: Literal["filled"] = field(default="filled", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class PartiallyFilled:
+    """Order was partially filled; `remaining_quantity` is still working."""
+
+    order: Order
+    trades: list[Trade]
+    remaining_quantity: Decimal
+    kind: Literal["partially_filled"] = field(default="partially_filled", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class Rejected:
+    """Broker rejected the order. `saxo_error_code` is None for non-Saxo brokers."""
+
+    reason: str
+    saxo_error_code: str | None = None
+    kind: Literal["rejected"] = field(default="rejected", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class BrokerDown:
+    """Broker call failed in a transient way; caller decides retry vs abort."""
+
+    detail: str
+    kind: Literal["broker_down"] = field(default="broker_down", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class IdempotentReplay:
+    """Replay of a previously-placed order (same idempotency_key)."""
+
+    order: Order
+    trades: list[Trade]
+    original_idempotency_key: str
+    kind: Literal["idempotent_replay"] = field(default="idempotent_replay", init=False)
+
+
+OrderResult = Filled | PartiallyFilled | Rejected | BrokerDown | IdempotentReplay
+
+
 class IBroker(Protocol):
     """Execution venue."""
 
@@ -108,14 +166,20 @@ from snapd_invest.broker.saxo import SaxoAccountInfo, SaxoBroker  # noqa: E402
 
 __all__ = [
     "BrokerAuthError",
+    "BrokerDown",
     "BrokerError",
     "BrokerFactory",
     "BrokerHttpError",
     "BrokerTimeoutError",
     "FillResult",
+    "Filled",
     "IBroker",
+    "IdempotentReplay",
     "OrderRequest",
+    "OrderResult",
     "PaperBroker",
+    "PartiallyFilled",
+    "Rejected",
     "SaxoAccountInfo",
     "SaxoBroker",
     "Side",
