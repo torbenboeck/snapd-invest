@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from snapd_invest.agent import CONSERVATIVE_VALUE
-from snapd_invest.broker import PaperBroker
+from snapd_invest.broker import IBroker, PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.llm import FakeLlmProvider
 from snapd_invest.pipeline import (
@@ -19,6 +19,7 @@ from snapd_invest.pipeline import (
     run_microtrader_once,
 )
 from snapd_invest.portfolio import create_account
+from snapd_invest.promotion import Allowed, PromotionDecision
 from snapd_invest.recommendation import create_recommendation
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal, SMACrossoverConfig
@@ -26,8 +27,20 @@ from snapd_invest.strategy import Signal, SMACrossoverConfig
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import FakeClock
-    from snapd_invest.models import Instrument
+    from snapd_invest.models import Account, Instrument
+
+
+def _factory_for(broker: PaperBroker) -> BrokerFactory:
+    def factory(_account: Account) -> IBroker:
+        return broker
+
+    return factory
+
+
+def _allow_all(_account: Account, _broker: IBroker) -> PromotionDecision:
+    return Allowed()
 
 
 class TestParseWatchlistEntry:
@@ -105,7 +118,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            broker,
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             account=account,
             instrument=instrument,
@@ -133,7 +147,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            broker,
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             account=account,
             instrument=instrument,
@@ -159,7 +174,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            broker,
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(kill_switch=True),
             account=account,
             instrument=instrument,
