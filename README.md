@@ -32,7 +32,9 @@ cd cli
 dotnet run --project src/SnapdInvest.Cli -- status
 ```
 
-Full setup: [`docs/setup.md`](docs/setup.md) (TODO).
+Full setup: [`docs/setup.md`](docs/setup.md).
+
+Working with this repo as a Claude Code agent: see [`AGENTS.md`](AGENTS.md).
 
 ## Repository layout
 

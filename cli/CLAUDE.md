@@ -80,12 +80,20 @@ Each command renders output with Spectre.Console — tables for lists, panels fo
 
 ## Engine endpoint configuration
 
-The engine URL is configured via:
+The engine URL is read from the `Engine:Url` configuration key. `Program.cs`
+builds it via `ConfigurationBuilder` from these sources, in increasing priority
+(later sources override earlier ones for the same key):
 
-1. `--engine-url` CLI option (highest priority)
-2. `SNAPDINVEST_ENGINE_URL` environment variable
-3. `appsettings.json` → `Engine:Url`
-4. Default: `http://localhost:8000`
+1. `appsettings.json` → `Engine:Url`
+2. Environment variables prefixed `SNAPDINVEST_` — set
+   `SNAPDINVEST_Engine__Url` (double underscore maps to `:` per .NET
+   configuration conventions; the prefix is stripped before binding).
+3. Command-line args — pass `--Engine:Url <value>` (literal colon, the form
+   `AddCommandLine` understands). There is no kebab-case `--engine-url` alias.
+4. Fallback in `Program.cs`: `http://localhost:8000` when none of the above are set.
+
+If you want a friendlier `--engine-url` flag, see the open follow-up captured
+in the 2026-05-16 architectural review under F-08 — it's deferred.
 
 ---
 
