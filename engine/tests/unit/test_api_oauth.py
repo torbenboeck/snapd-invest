@@ -366,6 +366,69 @@ class TestGetAccount:
             resp = await ac.get("/v1/accounts/does-not-exist")
         assert resp.status_code == 404
 
+    async def test_returns_401_when_no_tokens_stored_for_sim_account(
+        self,
+        db_session: AsyncSession,
+        db_engine: object,
+        fake_clock: FakeClock,
+        sim_settings: Settings,
+    ) -> None:
+        """When the user never completed OAuth, surface a 401 with a
+        machine-parseable code so the CLI can tell them to re-run auth."""
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        await db_session.commit()
+
+        app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(f"/v1/accounts/{account.id}")
+        assert resp.status_code == 401, resp.text
+        body = resp.json()
+        assert body["detail"]["code"] == "saxo_reauth_required"
+        assert body["detail"]["account_id"] == account.id
+        assert "snapdinvest auth saxo" in body["detail"]["message"]
+
+    @respx.mock
+    async def test_returns_401_when_refresh_fails(
+        self,
+        db_session: AsyncSession,
+        db_engine: object,
+        fake_clock: FakeClock,
+        sim_settings: Settings,
+    ) -> None:
+        """When the stored access token is near expiry and the refresh
+        endpoint rejects our refresh token, surface a 401 + reauth code."""
+        assert sim_settings.encryption_key is not None
+        cipher = FernetCipher(sim_settings.encryption_key.encode("ascii"))
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        # access_expires_at within REFRESH_BUFFER_SECONDS (=60) so the
+        # proactive-refresh path in get_active_access_token triggers.
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=TokenSet(
+                access_token="stale",
+                refresh_token="expired",
+                access_expires_at=fake_clock.now() + timedelta(seconds=30),
+                refresh_expires_at=fake_clock.now() + timedelta(seconds=86400),
+            ),
+        )
+        await db_session.commit()
+
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(401, json={"error": "invalid_grant"})
+        )
+
+        app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(f"/v1/accounts/{account.id}")
+        assert resp.status_code == 401, resp.text
+        body = resp.json()
+        assert body["detail"]["code"] == "saxo_reauth_required"
+        assert body["detail"]["account_id"] == account.id
+
 
 # ---------------------------------------------------------------------------
 # POST /v1/accounts
