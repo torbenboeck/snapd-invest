@@ -20,8 +20,8 @@ from snapd_invest.broker import (
     BrokerAuthError,
     BrokerHttpError,
     BrokerTimeoutError,
-    FillResult,
     OrderRequest,
+    OrderResult,
 )
 from snapd_invest.broker.saxo_oauth import (
     get_active_access_token,
@@ -89,7 +89,7 @@ class SaxoBroker:
             name=payload.get("Name", ""),
         )
 
-    async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult:
+    async def place_order(self, session: AsyncSession, request: OrderRequest) -> OrderResult:
         """T-001-B will implement order placement against Saxo SIM."""
         raise NotImplementedError("SaxoBroker.place_order arrives in T-001-B (paper-only at MVP)")
 

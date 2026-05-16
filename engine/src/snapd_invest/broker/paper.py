@@ -4,7 +4,7 @@ Fills market orders immediately at the latest bar's close price. Limit orders
 fill if the limit is "marketable" against the last price (buy: last <= limit;
 sell: last >= limit). Otherwise the order is persisted with `rejected` status.
 
-The protocol (`IBroker`) and DTOs (`OrderRequest`, `FillResult`) live in the
+The protocol (`IBroker`) and DTOs (`OrderRequest`, `OrderResult`) live in the
 package's `__init__.py` so they can be imported without dragging PaperBroker
 internals along.
 """
@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from snapd_invest.broker import FillResult, OrderRequest
+from snapd_invest.broker import (
+    Filled,
+    IdempotentReplay,
+    OrderRequest,
+    OrderResult,
+    Rejected,
+)
 from snapd_invest.models import Bar, Order, Position, Trade, new_id
 
 if TYPE_CHECKING:
@@ -34,17 +40,21 @@ class PaperBroker:
     def __init__(self, clock: Clock) -> None:
         self._clock = clock
 
-    async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult:
+    async def place_order(self, session: AsyncSession, request: OrderRequest) -> OrderResult:
         existing = await self._find_by_idempotency_key(session, request.idempotency_key)
         if existing is not None:
             trades_stmt = select(Trade).where(Trade.order_id == existing.id)
             existing_trades = list((await session.execute(trades_stmt)).scalars().all())
-            return FillResult(order=existing, trades=existing_trades, was_idempotent_replay=True)
+            return IdempotentReplay(
+                order=existing,
+                trades=existing_trades,
+                original_idempotency_key=request.idempotency_key,
+            )
 
         last_price = await self.get_last_price(session, instrument=request.instrument)
         if last_price is None:
-            order = await self._persist_order(session, request, status="rejected")
-            return FillResult(order=order, trades=[], was_idempotent_replay=False)
+            await self._persist_order(session, request, status="rejected")
+            return Rejected(reason="no last price available", saxo_error_code=None)
 
         fill_price: Decimal | None = last_price
         if request.limit_price is not None:
@@ -53,15 +63,15 @@ class PaperBroker:
             fill_price = None if buy_above_limit or sell_below_limit else request.limit_price
 
         if fill_price is None:
-            order = await self._persist_order(session, request, status="rejected")
-            return FillResult(order=order, trades=[], was_idempotent_replay=False)
+            await self._persist_order(session, request, status="rejected")
+            return Rejected(reason="limit price not marketable", saxo_error_code=None)
 
         order = await self._persist_order(session, request, status="filled")
         trade = await self._persist_trade(session, order, fill_price, request.quantity)
         await self._apply_to_position(session, request, fill_price)
         await self._apply_to_cash(session, request, fill_price)
 
-        return FillResult(order=order, trades=[trade], was_idempotent_replay=False)
+        return Filled(order=order, trades=[trade])
 
     async def get_last_price(
         self, session: AsyncSession, *, instrument: Instrument

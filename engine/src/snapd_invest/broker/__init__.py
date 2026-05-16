@@ -8,17 +8,17 @@
 This package owns ALL broker imports — neither strategies, agents, the risk
 gate, nor execution code should import broker-vendor SDKs directly.
 
-Module ordering: types (IBroker, OrderRequest, FillResult) are defined first,
-PaperBroker is imported last. PaperBroker imports the types from the parent
-package via the partial module Python provides during cyclic import — this
-keeps the package's public surface in `__init__.py` without forcing a
-separate `_types.py` file.
+Module ordering: types (IBroker, OrderRequest, OrderResult) are defined
+first, PaperBroker is imported last. PaperBroker imports the types from the
+parent package via the partial module Python provides during cyclic import
+— this keeps the package's public surface in `__init__.py` without forcing
+a separate `_types.py` file.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
@@ -76,19 +76,67 @@ class OrderRequest:
     correlation_id: str | None = None
 
 
+# ----------------------------------------------------------------------------
+# OrderResult — typed discriminated union (ADR-006)
+#
+# Variants are tagged with a `kind` Literal so call sites can pattern-match
+# with `match` + `typing.assert_never` for compiler-enforced exhaustiveness.
+# ----------------------------------------------------------------------------
+
+
 @dataclass(slots=True, frozen=True)
-class FillResult:
-    """Outcome of placing an order."""
+class Filled:
+    """Order was fully filled."""
+
+    order: Order
+    trades: list[Trade] = field(default_factory=list)
+    kind: Literal["filled"] = field(default="filled", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class PartiallyFilled:
+    """Order was partially filled; `remaining_quantity` is still working."""
 
     order: Order
     trades: list[Trade]
-    was_idempotent_replay: bool
+    remaining_quantity: Decimal
+    kind: Literal["partially_filled"] = field(default="partially_filled", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class Rejected:
+    """Broker rejected the order. `saxo_error_code` is None for non-Saxo brokers."""
+
+    reason: str
+    saxo_error_code: str | None = None
+    kind: Literal["rejected"] = field(default="rejected", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class BrokerDown:
+    """Broker call failed in a transient way; caller decides retry vs abort."""
+
+    detail: str
+    kind: Literal["broker_down"] = field(default="broker_down", init=False)
+
+
+@dataclass(slots=True, frozen=True)
+class IdempotentReplay:
+    """Replay of a previously-placed order (same idempotency_key)."""
+
+    order: Order
+    trades: list[Trade]
+    original_idempotency_key: str
+    kind: Literal["idempotent_replay"] = field(default="idempotent_replay", init=False)
+
+
+OrderResult = Filled | PartiallyFilled | Rejected | BrokerDown | IdempotentReplay
 
 
 class IBroker(Protocol):
     """Execution venue."""
 
-    async def place_order(self, session: AsyncSession, request: OrderRequest) -> FillResult: ...
+    async def place_order(self, session: AsyncSession, request: OrderRequest) -> OrderResult: ...
     async def get_last_price(
         self, session: AsyncSession, *, instrument: Instrument
     ) -> Decimal | None: ...
@@ -108,14 +156,19 @@ from snapd_invest.broker.saxo import SaxoAccountInfo, SaxoBroker  # noqa: E402
 
 __all__ = [
     "BrokerAuthError",
+    "BrokerDown",
     "BrokerError",
     "BrokerFactory",
     "BrokerHttpError",
     "BrokerTimeoutError",
-    "FillResult",
+    "Filled",
     "IBroker",
+    "IdempotentReplay",
     "OrderRequest",
+    "OrderResult",
     "PaperBroker",
+    "PartiallyFilled",
+    "Rejected",
     "SaxoAccountInfo",
     "SaxoBroker",
     "Side",
