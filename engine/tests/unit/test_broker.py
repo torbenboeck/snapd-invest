@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from snapd_invest.broker import OrderRequest, PaperBroker
+from snapd_invest.broker import (
+    Filled,
+    IdempotentReplay,
+    OrderRequest,
+    PaperBroker,
+    Rejected,
+)
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.models import Position
 from snapd_invest.portfolio import create_account
@@ -76,6 +82,7 @@ class TestPaperBrokerBuy:
             ),
         )
 
+        assert isinstance(result, Filled)
         assert result.order.status == "filled"
         assert len(result.trades) == 1
         assert result.trades[0].fill_price == Decimal("150")
@@ -273,6 +280,7 @@ class TestPaperBrokerLimitOrders:
                 idempotency_key="k",
             ),
         )
+        assert isinstance(result, Filled)
         assert result.order.status == "filled"
         assert result.trades[0].fill_price == Decimal("160")
 
@@ -296,8 +304,8 @@ class TestPaperBrokerLimitOrders:
                 idempotency_key="k",
             ),
         )
-        assert result.order.status == "rejected"
-        assert result.trades == []
+        assert isinstance(result, Rejected)
+        assert "limit price not marketable" in result.reason
 
 
 class TestIdempotency:
@@ -321,8 +329,10 @@ class TestIdempotency:
         first = await broker.place_order(db_session, req)
         second = await broker.place_order(db_session, req)
 
+        assert isinstance(first, Filled)
+        assert isinstance(second, IdempotentReplay)
         assert first.order.id == second.order.id
-        assert second.was_idempotent_replay is True
+        assert second.original_idempotency_key == "dup-key"
 
 
 class TestNoPriceData:
@@ -353,4 +363,5 @@ class TestNoPriceData:
                 idempotency_key="k",
             ),
         )
-        assert result.order.status == "rejected"
+        assert isinstance(result, Rejected)
+        assert "no last price" in result.reason
