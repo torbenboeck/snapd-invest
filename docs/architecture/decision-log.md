@@ -176,6 +176,75 @@ T-001-A wires Saxo SIM as the second execution venue. Saxo OpenAPI exposes four 
 
 ---
 
+## ADR-006 — Order outcomes: typed discriminated union
+
+**Date:** 2026-05-16
+**Status:** Accepted
+
+### Context
+
+T-001-A used `FillResult` (a dataclass with `order`, `trades`,
+`was_idempotent_replay`) and `BrokerError` subclasses for placement
+outcomes. Sufficient when there were only two reachable outcomes
+(PaperBroker always fills if there's a price, rejects otherwise).
+
+T-001-B's `SaxoBroker.place_order` against real Saxo SIM has many more
+meaningful outcomes the caller has to discriminate: filled vs partially
+filled, rejected with a specific Saxo `ErrorCode`, transient broker
+down, idempotent replay of a previous attempt. Exceptions don't fit —
+these aren't error conditions, they're business outcomes.
+
+### Decision
+
+Replace `FillResult` with a typed discriminated union `OrderResult`:
+
+- `Filled(order, trades)`
+- `PartiallyFilled(order, trades, remaining_quantity)`
+- `Rejected(reason, saxo_error_code)`
+- `BrokerDown(detail)` — transient; caller decides retry
+- `IdempotentReplay(order, trades, original_idempotency_key)`
+
+Implemented as `Literal["filled"]`-tagged frozen dataclasses with a
+`kind` discriminator. Call sites pattern-match with `match` +
+`typing.assert_never` for compiler-enforced exhaustiveness.
+
+### Idempotency mapping
+
+Our internal `idempotency_key` (SHA-256 of signal content, 32 chars)
+maps directly to Saxo's `ExternalReference` order-body field. On
+placement: check our DB for an existing `Order` with that key first;
+return `IdempotentReplay` without calling Saxo if found and terminal.
+If found but pending, reconcile via Saxo's order lookup. If not found,
+place with `ExternalReference=<key>`.
+
+### Consequences
+
+**Pro:**
+- Exhaustive handling enforced by mypy + `assert_never`.
+- Clear separation between "business outcomes" (union) and
+  "infrastructure failures" (BrokerError) — different shapes serve
+  different surfaces.
+- Saxo's `ErrorCode` surfaces as structured data, not a stringly-typed
+  HTTP body the caller has to parse.
+
+**Con:**
+- `PaperBroker` (which only ever returns `Filled | Rejected |
+  IdempotentReplay`) carries the BrokerDown + PartiallyFilled branches
+  as theoretical possibilities its tests never exercise. Acceptable —
+  one return type is simpler than two.
+- More verbose at call sites than a single dataclass. The exhaustive
+  `match` is the point.
+
+### Notes
+
+`BrokerError` and its hierarchy (`BrokerAuthError`, `BrokerHttpError`,
+`BrokerTimeoutError`) remain for read paths and side-effect-free
+operations (`get_account`, `get_last_price`, `get_positions`,
+`cancel_order`, `get_open_orders`). Placement is the only surface that
+uses the union.
+
+---
+
 ## How to add an entry
 
 Append a new ADR section using the next number. Format:
