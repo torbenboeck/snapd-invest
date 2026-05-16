@@ -25,10 +25,11 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.agent import Personality
-    from snapd_invest.broker import IBroker
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import Clock
     from snapd_invest.llm import ILlmProvider
     from snapd_invest.models import Account, Instrument
+    from snapd_invest.promotion import PromotionGate
     from snapd_invest.risk import RiskConfig
     from snapd_invest.strategy import Signal, SMACrossoverConfig
 
@@ -61,7 +62,8 @@ class MicroTraderOutcome:
 async def run_microtrader_once(
     session: AsyncSession,
     clock: Clock,
-    broker: IBroker,
+    broker_factory: BrokerFactory,
+    promotion_gate: PromotionGate,
     risk_config: RiskConfig,
     *,
     account: Account,
@@ -73,8 +75,8 @@ async def run_microtrader_once(
 
     Called by `POST /v1/run-once` and by the scheduled MicroTrader job. The
     function loads bars, runs the strategy, sends any signals through the
-    risk gate, and persists orders via the broker. It does NOT commit the
-    session — the caller owns the transaction boundary.
+    promotion gate, risk gate, and broker. It does NOT commit the session —
+    the caller owns the transaction boundary.
     """
     strategy = SMACrossoverStrategy(strategy_config)
     signals = await strategy.run(
@@ -84,7 +86,9 @@ async def run_microtrader_once(
         emitted_at=clock.now(),
         correlation_id=correlation_id,
     )
-    outcomes = await execute_signals(session, clock, broker, risk_config, signals)
+    outcomes = await execute_signals(
+        session, clock, broker_factory, promotion_gate, risk_config, signals
+    )
     return MicroTraderOutcome(
         signals=list(signals),
         execution_summaries=[

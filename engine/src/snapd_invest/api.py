@@ -56,6 +56,7 @@ from snapd_invest.portfolio import (
     create_account,
     get_account_by_name,
 )
+from snapd_invest.promotion import PromotionGate, trivial_promotion_gate
 from snapd_invest.recommendation import (
     SignalModification,
     approve_and_execute,
@@ -135,15 +136,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.broker_factory = _make_broker_factory(
         settings, app.state.clock, app.state.broker, app.state.saxo_http_client
     )
+    app.state.promotion_gate = trivial_promotion_gate
 
     if settings.scheduler_enabled:
         jobs = build_default_jobs(
             session_factory=app.state.session_factory,
             clock=app.state.clock,
-            broker=app.state.broker,
+            broker_factory=app.state.broker_factory,
             llm=app.state.llm,
             risk_config=app.state.risk_config,
             settings=settings,
+            promotion_gate=app.state.promotion_gate,
         )
         scheduler = build_scheduler(jobs)
         scheduler.start()
@@ -188,16 +191,16 @@ def clock_dep(request: Request) -> Clock:
     return request.app.state.clock  # type: ignore[no-any-return]
 
 
-def broker_dep(request: Request) -> PaperBroker:
-    return request.app.state.broker  # type: ignore[no-any-return]
-
-
 def saxo_http_client_dep(request: Request) -> httpx.AsyncClient:
     return request.app.state.saxo_http_client  # type: ignore[no-any-return]
 
 
 def broker_factory_dep(request: Request) -> BrokerFactory:
     return request.app.state.broker_factory  # type: ignore[no-any-return]
+
+
+def promotion_gate_dep(request: Request) -> PromotionGate:
+    return request.app.state.promotion_gate  # type: ignore[no-any-return]
 
 
 def llm_dep(request: Request) -> OllamaProvider:
@@ -452,7 +455,8 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         request: Request,
         session: Annotated[AsyncSession, Depends(session_dep)],
         clock: Annotated[Clock, Depends(clock_dep)],
-        broker: Annotated[PaperBroker, Depends(broker_dep)],
+        broker_factory: Annotated[BrokerFactory, Depends(broker_factory_dep)],
+        promotion_gate: Annotated[PromotionGate, Depends(promotion_gate_dep)],
         risk_config: Annotated[RiskConfig, Depends(risk_dep)],
         instrument_symbol: str = "AAPL",
         instrument_exchange: str = "NASDAQ",
@@ -473,7 +477,8 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         outcome = await run_microtrader_once(
             session,
             clock,
-            broker,
+            broker_factory,
+            promotion_gate,
             risk_config,
             account=account,
             instrument=instrument,
@@ -570,7 +575,8 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         payload: ApproveRequest | None,
         session: Annotated[AsyncSession, Depends(session_dep)],
         clock: Annotated[Clock, Depends(clock_dep)],
-        broker: Annotated[PaperBroker, Depends(broker_dep)],
+        broker_factory: Annotated[BrokerFactory, Depends(broker_factory_dep)],
+        promotion_gate: Annotated[PromotionGate, Depends(promotion_gate_dep)],
         risk_config: Annotated[RiskConfig, Depends(risk_dep)],
     ) -> ApproveResponseDto:
         rec = await get_recommendation(session, rec_id)
@@ -591,7 +597,8 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
             outcome = await approve_and_execute(
                 session,
                 clock,
-                broker,
+                broker_factory,
+                promotion_gate,
                 risk_config,
                 recommendation=rec,
                 modifications=modifications,

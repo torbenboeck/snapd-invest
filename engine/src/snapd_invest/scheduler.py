@@ -30,15 +30,17 @@ from snapd_invest.pipeline import (
     run_microtrader_once,
 )
 from snapd_invest.portfolio import get_account_by_name
+from snapd_invest.promotion import trivial_promotion_gate
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from snapd_invest.broker import IBroker
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import Clock
     from snapd_invest.config import Settings
     from snapd_invest.llm import ILlmProvider
     from snapd_invest.models import Account, Instrument
+    from snapd_invest.promotion import PromotionGate
     from snapd_invest.risk import RiskConfig
 
 log: structlog.stdlib.BoundLogger = structlog.get_logger(__name__)
@@ -88,10 +90,11 @@ def build_default_jobs(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     clock: Clock,
-    broker: IBroker,
+    broker_factory: BrokerFactory,
     llm: ILlmProvider,
     risk_config: RiskConfig,
     settings: Settings,
+    promotion_gate: PromotionGate = trivial_promotion_gate,
 ) -> list[JobConfig]:
     """Wire pipeline functions as APScheduler-friendly closures.
 
@@ -133,7 +136,8 @@ def build_default_jobs(
                     await run_microtrader_once(
                         session,
                         clock,
-                        broker,
+                        broker_factory,
+                        promotion_gate,
                         risk_config,
                         account=account,
                         instrument=instrument,

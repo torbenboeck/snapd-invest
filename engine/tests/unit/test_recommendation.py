@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from snapd_invest.agent import ensure_default_agent
-from snapd_invest.broker import PaperBroker
+from snapd_invest.broker import IBroker, PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.portfolio import create_account
+from snapd_invest.promotion import Allowed, PromotionDecision
 from snapd_invest.recommendation import (
     SignalModification,
     approve_and_execute,
@@ -27,7 +28,20 @@ from snapd_invest.strategy import Signal
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import FakeClock
+    from snapd_invest.models import Account
+
+
+def _factory_for(broker: PaperBroker) -> BrokerFactory:
+    def factory(_account: Account) -> IBroker:
+        return broker
+
+    return factory
+
+
+def _allow_all(_account: Account, _broker: IBroker) -> PromotionDecision:
+    return Allowed()
 
 
 async def _setup_world(session: AsyncSession, clock: FakeClock) -> tuple[object, object, object]:
@@ -137,7 +151,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            broker,
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             recommendation=rec,
         )
@@ -161,7 +176,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            broker,
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             recommendation=rec,
             modifications=[
@@ -189,7 +205,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            broker,
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             recommendation=rec,
             modifications=[
@@ -214,11 +231,14 @@ class TestApproveAndExecute:
             rationale="t",
         )
         broker = PaperBroker(fake_clock)
-        await approve_and_execute(db_session, fake_clock, broker, RiskConfig(), recommendation=rec)
+        factory = _factory_for(broker)
+        await approve_and_execute(
+            db_session, fake_clock, factory, _allow_all, RiskConfig(), recommendation=rec
+        )
         # Try again
         with pytest.raises(ValueError, match="not pending"):
             await approve_and_execute(
-                db_session, fake_clock, broker, RiskConfig(), recommendation=rec
+                db_session, fake_clock, factory, _allow_all, RiskConfig(), recommendation=rec
             )
 
     async def test_rejects_expired(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
@@ -236,7 +256,12 @@ class TestApproveAndExecute:
 
         with pytest.raises(ValueError, match="expired"):
             await approve_and_execute(
-                db_session, fake_clock, broker, RiskConfig(), recommendation=rec
+                db_session,
+                fake_clock,
+                _factory_for(broker),
+                _allow_all,
+                RiskConfig(),
+                recommendation=rec,
             )
 
 

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from snapd_invest.broker import PaperBroker
+from snapd_invest.broker import IBroker, PaperBroker
 from snapd_invest.config import Settings
 from snapd_invest.llm import FakeLlmProvider
 from snapd_invest.risk import RiskConfig
@@ -17,7 +17,16 @@ from snapd_invest.scheduler import JobConfig, build_default_jobs, build_schedule
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import FakeClock
+    from snapd_invest.models import Account
+
+
+def _factory_for(broker: PaperBroker) -> BrokerFactory:
+    def factory(_account: Account) -> IBroker:
+        return broker
+
+    return factory
 
 
 class TestBuildDefaultJobs:
@@ -34,7 +43,7 @@ class TestBuildDefaultJobs:
         jobs = build_default_jobs(
             session_factory=factory,
             clock=fake_clock,
-            broker=PaperBroker(fake_clock),
+            broker_factory=_factory_for(PaperBroker(fake_clock)),
             llm=FakeLlmProvider(),
             risk_config=RiskConfig(),
             settings=settings,
@@ -51,7 +60,7 @@ class TestBuildDefaultJobs:
         jobs = build_default_jobs(
             session_factory=factory,
             clock=fake_clock,
-            broker=PaperBroker(fake_clock),
+            broker_factory=_factory_for(PaperBroker(fake_clock)),
             llm=FakeLlmProvider(),
             risk_config=RiskConfig(),
             settings=Settings(_env_file=None),  # type: ignore[call-arg]
@@ -74,7 +83,7 @@ class TestHandlerErrorIsolation:
         jobs = build_default_jobs(
             session_factory=factory,
             clock=fake_clock,
-            broker=PaperBroker(fake_clock),
+            broker_factory=_factory_for(PaperBroker(fake_clock)),
             llm=FakeLlmProvider(),
             risk_config=RiskConfig(),
             settings=settings,

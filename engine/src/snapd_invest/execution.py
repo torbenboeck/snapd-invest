@@ -1,4 +1,4 @@
-"""Execution pipeline: Signal -> RiskGate -> Order.
+"""Execution pipeline: Signal -> PromotionGate -> RiskGate -> Order.
 
 This module orchestrates the path from a strategy/agent signal to a placed
 order. Every step records an audit event so the full decision history is
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from sqlalchemy import select
 
@@ -21,13 +21,14 @@ from snapd_invest.audit import record_event
 from snapd_invest.broker import (
     BrokerDown,
     Filled,
-    IBroker,
     IdempotentReplay,
     OrderRequest,
+    OrderResult,
     PartiallyFilled,
     Rejected,
 )
 from snapd_invest.models import Account, Instrument
+from snapd_invest.promotion import DeniedFor
 from snapd_invest.risk import RiskConfig, SignalCandidate, evaluate
 
 if TYPE_CHECKING:
@@ -35,7 +36,9 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import Clock
+    from snapd_invest.promotion import PromotionGate
     from snapd_invest.strategy import Signal
 
 
@@ -70,16 +73,91 @@ async def _load_account(session: AsyncSession, account_id: str) -> Account:
     return (await session.execute(stmt)).scalar_one()
 
 
+async def _record_order_result(
+    session: AsyncSession,
+    clock: Clock,
+    *,
+    signal: Signal,
+    result: OrderResult,
+) -> ExecutionOutcome:
+    """Translate an `OrderResult` into audit events + an `ExecutionOutcome`.
+
+    Uses `match` + `assert_never` so mypy enforces exhaustiveness — adding a
+    new variant to the `OrderResult` union breaks the build here until a case
+    is added.
+    """
+    match result:
+        case Filled() | PartiallyFilled() | IdempotentReplay():
+            await record_event(
+                session,
+                clock,
+                event_type="order_placed",
+                correlation_id=signal.correlation_id,
+                payload={
+                    "order_id": result.order.id,
+                    "status": result.order.status,
+                    "kind": result.kind,
+                    "trade_count": len(result.trades),
+                },
+            )
+            return ExecutionOutcome(
+                signal=signal,
+                gate_allowed=True,
+                gate_reason=None,
+                order_id=result.order.id,
+                order_status=result.order.status,
+            )
+        case Rejected():
+            await record_event(
+                session,
+                clock,
+                event_type="order_rejected",
+                correlation_id=signal.correlation_id,
+                payload={
+                    "kind": result.kind,
+                    "reason": result.reason,
+                    "saxo_error_code": result.saxo_error_code,
+                },
+            )
+            return ExecutionOutcome(
+                signal=signal,
+                gate_allowed=True,
+                gate_reason=None,
+                order_id=None,
+                order_status="rejected",
+            )
+        case BrokerDown():
+            await record_event(
+                session,
+                clock,
+                event_type="broker_down",
+                correlation_id=signal.correlation_id,
+                payload={"kind": result.kind, "detail": result.detail},
+            )
+            return ExecutionOutcome(
+                signal=signal,
+                gate_allowed=True,
+                gate_reason=None,
+                order_id=None,
+                order_status="broker_down",
+            )
+        case _:
+            assert_never(result)
+
+
 async def execute_signal(
     session: AsyncSession,
     clock: Clock,
-    broker: IBroker,
+    broker_factory: BrokerFactory,
+    promotion_gate: PromotionGate,
     risk_config: RiskConfig,
     signal: Signal,
 ) -> ExecutionOutcome:
-    """Send a single signal through the risk gate and (if allowed) the broker.
+    """Send a single signal through the promotion gate, risk gate, and broker.
 
-    Records an audit event at each step.
+    Order of checks: PromotionGate (per-account) -> RiskGate (per-signal) ->
+    broker.place_order. Records an audit event at each step. `hold` signals
+    short-circuit before any gate evaluation — they are not placement intents.
     """
     instrument = await _load_instrument(
         session, symbol=signal.instrument_symbol, exchange=signal.instrument_exchange
@@ -104,6 +182,29 @@ async def execute_signal(
     if signal.action == "hold":
         return ExecutionOutcome(
             signal=signal, gate_allowed=True, gate_reason=None, order_id=None, order_status="hold"
+        )
+
+    broker = broker_factory(account)
+
+    promotion_decision = promotion_gate(account, broker)
+    if isinstance(promotion_decision, DeniedFor):
+        await record_event(
+            session,
+            clock,
+            event_type="promotion_denied",
+            correlation_id=signal.correlation_id,
+            payload={
+                "reason": promotion_decision.reason,
+                "account_id": account.id,
+                "account_type": account.account_type,
+            },
+        )
+        return ExecutionOutcome(
+            signal=signal,
+            gate_allowed=False,
+            gate_reason=promotion_decision.reason,
+            order_id=None,
+            order_status="promotion_denied",
         )
 
     decision = await evaluate(
@@ -153,74 +254,23 @@ async def execute_signal(
         ),
     )
 
-    if isinstance(result, Filled | PartiallyFilled | IdempotentReplay):
-        await record_event(
-            session,
-            clock,
-            event_type="order_placed",
-            correlation_id=signal.correlation_id,
-            payload={
-                "order_id": result.order.id,
-                "status": result.order.status,
-                "kind": result.kind,
-                "trade_count": len(result.trades),
-            },
-        )
-        return ExecutionOutcome(
-            signal=signal,
-            gate_allowed=True,
-            gate_reason=None,
-            order_id=result.order.id,
-            order_status=result.order.status,
-        )
-
-    if isinstance(result, Rejected):
-        await record_event(
-            session,
-            clock,
-            event_type="order_rejected",
-            correlation_id=signal.correlation_id,
-            payload={
-                "kind": result.kind,
-                "reason": result.reason,
-                "saxo_error_code": result.saxo_error_code,
-            },
-        )
-        return ExecutionOutcome(
-            signal=signal,
-            gate_allowed=True,
-            gate_reason=None,
-            order_id=None,
-            order_status="rejected",
-        )
-
-    # BrokerDown
-    assert isinstance(result, BrokerDown)
-    await record_event(
-        session,
-        clock,
-        event_type="broker_down",
-        correlation_id=signal.correlation_id,
-        payload={"kind": result.kind, "detail": result.detail},
-    )
-    return ExecutionOutcome(
-        signal=signal,
-        gate_allowed=True,
-        gate_reason=None,
-        order_id=None,
-        order_status="broker_down",
-    )
+    return await _record_order_result(session, clock, signal=signal, result=result)
 
 
 async def execute_signals(
     session: AsyncSession,
     clock: Clock,
-    broker: IBroker,
+    broker_factory: BrokerFactory,
+    promotion_gate: PromotionGate,
     risk_config: RiskConfig,
     signals: Sequence[Signal],
 ) -> list[ExecutionOutcome]:
     """Run a batch of signals through the pipeline. Returns per-signal outcomes."""
     outcomes: list[ExecutionOutcome] = []
     for signal in signals:
-        outcomes.append(await execute_signal(session, clock, broker, risk_config, signal))
+        outcomes.append(
+            await execute_signal(
+                session, clock, broker_factory, promotion_gate, risk_config, signal
+            )
+        )
     return outcomes

@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from snapd_invest.audit import list_events
-from snapd_invest.broker import PaperBroker
+from snapd_invest.broker import BrokerFactory, IBroker, PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.execution import execute_signal
-from snapd_invest.models import Order, Position
+from snapd_invest.models import Account, Order, Position
 from snapd_invest.portfolio import create_account
+from snapd_invest.promotion import Allowed, DeniedFor, PromotionDecision, PromotionGate
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal
 
@@ -21,6 +22,26 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.clock import FakeClock
+
+
+def _factory_for(broker: PaperBroker) -> BrokerFactory:
+    """Return a `BrokerFactory` that always yields `broker`."""
+
+    def factory(_account: Account) -> IBroker:
+        return broker
+
+    return factory
+
+
+def _allow_all(_account: Account, _broker: IBroker) -> PromotionDecision:
+    return Allowed()
+
+
+def _deny_all(reason: str) -> PromotionGate:
+    def gate(_account: Account, _broker: IBroker) -> PromotionDecision:
+        return DeniedFor(reason=reason)
+
+    return gate
 
 
 def _setup_signal(account_id: str, *, reference_price: Decimal | None = Decimal("150")) -> Signal:
@@ -80,7 +101,14 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)
 
-        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _allow_all,
+            RiskConfig(),
+            signal,
+        )
 
         assert outcome.gate_allowed
         assert outcome.order_status == "filled"
@@ -98,7 +126,12 @@ class TestExecuteSignal:
         signal = _setup_signal(account.id)
 
         outcome = await execute_signal(
-            db_session, fake_clock, broker, RiskConfig(kill_switch=True), signal
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _allow_all,
+            RiskConfig(kill_switch=True),
+            signal,
         )
 
         assert not outcome.gate_allowed
@@ -113,7 +146,14 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)
 
-        await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _allow_all,
+            RiskConfig(),
+            signal,
+        )
         await db_session.commit()
 
         events = await list_events(db_session, correlation_id="corr-1")
@@ -129,8 +169,22 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)
 
-        first = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
-        second = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        first = await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _allow_all,
+            RiskConfig(),
+            signal,
+        )
+        second = await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _allow_all,
+            RiskConfig(),
+            signal,
+        )
 
         assert first.order_id == second.order_id
 
@@ -172,7 +226,14 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)  # qty=5, reference_price=150 -> cost 750
 
-        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _allow_all,
+            RiskConfig(),
+            signal,
+        )
 
         assert not outcome.gate_allowed
         assert outcome.gate_reason is not None
@@ -188,7 +249,85 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id, reference_price=None)
 
-        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _allow_all,
+            RiskConfig(),
+            signal,
+        )
 
         assert not outcome.gate_allowed
         assert outcome.gate_reason == "missing_reference_price"
+
+    async def test_promotion_denial_short_circuits_before_risk_gate(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """When the promotion gate denies, neither the risk gate nor the
+        broker should be reached. The outcome surfaces the gate's reason and
+        records a `promotion_denied` audit event (no `risk_decision` event)."""
+        account, _ = await _seed(db_session, fake_clock, last_price=Decimal("150"))
+        broker = PaperBroker(fake_clock)
+        signal = _setup_signal(account.id)
+
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _deny_all("promotion gate refused"),
+            RiskConfig(),
+            signal,
+        )
+        await db_session.commit()
+
+        assert not outcome.gate_allowed
+        assert outcome.gate_reason == "promotion gate refused"
+        assert outcome.order_status == "promotion_denied"
+        assert outcome.order_id is None
+
+        events = await list_events(db_session, correlation_id="corr-1")
+        types = [e.type for e in events]
+        assert "promotion_denied" in types
+        assert "risk_decision" not in types
+        orders = list((await db_session.execute(select(Order))).scalars().all())
+        assert orders == []
+
+    async def test_hold_signal_skips_both_gates(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """`hold` is not a placement intent. The promotion gate must not be
+        consulted (it would log a misleading denial for accounts the gate
+        would otherwise reject)."""
+        account, _ = await _seed(db_session, fake_clock, last_price=Decimal("150"))
+        broker = PaperBroker(fake_clock)
+        signal = Signal(
+            source="test_strategy",
+            account_id=account.id,
+            instrument_symbol="AAPL",
+            instrument_exchange="NASDAQ",
+            action="hold",
+            quantity=Decimal("0"),
+            conviction=Decimal("0.5"),
+            rationale="wait",
+            emitted_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+            correlation_id="corr-hold",
+            reference_price=Decimal("150"),
+        )
+
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            _factory_for(broker),
+            _deny_all("would deny if asked"),
+            RiskConfig(),
+            signal,
+        )
+        await db_session.commit()
+
+        assert outcome.gate_allowed
+        assert outcome.order_status == "hold"
+        events = await list_events(db_session, correlation_id="corr-hold")
+        types = [e.type for e in events]
+        assert "promotion_denied" not in types
+        assert "risk_decision" not in types
