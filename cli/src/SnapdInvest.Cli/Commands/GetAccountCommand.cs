@@ -1,5 +1,8 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.Net;
+using System.Text.Json;
+using Refit;
 using SnapdInvest.Client;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -35,11 +38,48 @@ public sealed class GetAccountCommand(IEngineApi api) : AsyncCommand<GetAccountC
             AnsiConsole.Write(table);
             return 0;
         }
+        catch (ApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized
+                                      && IsSaxoReauthRequired(ex))
+        {
+            // The engine signals "user needs to re-run auth saxo" via
+            // {"detail": {"code": "saxo_reauth_required", ...}}. Saxo SIM
+            // refresh tokens expire quickly — surface the actionable
+            // command rather than a generic 401 stack trace.
+            AnsiConsole.MarkupLine("[yellow]Saxo session expired or never authenticated.[/]");
+            AnsiConsole.MarkupLineInterpolated(
+                CultureInfo.InvariantCulture,
+                $"Run: [bold]snapdinvest auth saxo --account {settings.AccountId}[/]");
+            return 1;
+        }
         catch (Exception ex)
         {
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
             return 1;
         }
+    }
+
+    private static bool IsSaxoReauthRequired(ApiException ex)
+    {
+        if (string.IsNullOrEmpty(ex.Content))
+        {
+            return false;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(ex.Content);
+            if (doc.RootElement.TryGetProperty("detail", out var detail)
+                && detail.ValueKind == JsonValueKind.Object
+                && detail.TryGetProperty("code", out var code)
+                && code.ValueKind == JsonValueKind.String)
+            {
+                return code.GetString() == "saxo_reauth_required";
+            }
+        }
+        catch (JsonException)
+        {
+            // Body wasn't JSON — fall through to the generic error path.
+        }
+        return false;
     }
 }
