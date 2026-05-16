@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -80,6 +81,9 @@ class Instrument(Base):
     instrument_type: Mapped[str] = mapped_column(String(16), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     tick_size: Mapped[Decimal] = mapped_column(_PRICE, nullable=False, default=Decimal("0.01"))
+    saxo_uic: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    saxo_asset_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    saxo_currency_decimals: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("symbol", "exchange", name="uq_instruments_symbol_exchange"),
