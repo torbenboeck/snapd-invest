@@ -226,6 +226,48 @@ retry logic can dispatch on `ErrorCode`.
 
 ---
 
+## Token lifetime gotcha
+
+Saxo SIM refresh tokens expire much faster than the developer portal suggests
+— in practice, sessions die after only a few hours, not the nominal 24h the
+`refresh_token_expires_in` field reports. The result: a SIM account that was
+working fine in the morning starts failing in the afternoon with no obvious
+cause.
+
+The engine surfaces this via `BrokerAuthError` from
+`SaxoBroker._authed_get` (no stored tokens, refresh rejected, or 401 that
+persists after refresh). The `/v1/accounts/{id}` route catches this and
+returns:
+
+```http
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+
+{
+  "detail": {
+    "code": "saxo_reauth_required",
+    "message": "Saxo session expired or never authenticated; run 'snapdinvest auth saxo --account <id>'",
+    "account_id": "<the account id>"
+  }
+}
+```
+
+The CLI recognises `detail.code == "saxo_reauth_required"` on a 401 and
+prints the actionable command instead of a stack trace:
+
+```
+Saxo session expired or never authenticated.
+Run: snapdinvest auth saxo --account <id>
+```
+
+T-001-B will apply the same treatment to `/v1/orders` and the other
+sim-aware routes — same exception, same code string, same CLI handling.
+
+User-facing fix: re-run `snapdinvest auth saxo --account <id>` to walk
+through the browser-based PKCE flow again.
+
+---
+
 ## Testing posture
 
 - Unit tests use `respx` to mock httpx — no network at all.

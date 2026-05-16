@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 — runtime needed for FastA
 from snapd_invest import __version__
 from snapd_invest.audit import list_events
 from snapd_invest.broker import (
+    BrokerAuthError,
     BrokerFactory,
     IBroker,
     PaperBroker,
@@ -764,7 +765,29 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
 
         broker = broker_factory(account)
         if isinstance(broker, SaxoBroker):
-            info = await broker.get_account(session)
+            try:
+                info = await broker.get_account(session)
+            except BrokerAuthError as exc:
+                # Surface as a structured 401 so the CLI can guide the user
+                # back through `snapdinvest auth saxo` instead of dumping a
+                # stack trace. Saxo SIM refresh tokens expire fast — see
+                # docs/integrations/saxo-openapi-notes.md.
+                log.info(
+                    "saxo_reauth_required",
+                    account_id=account.id,
+                    reason=str(exc),
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "saxo_reauth_required",
+                        "message": (
+                            "Saxo session expired or never authenticated; "
+                            "run 'snapdinvest auth saxo --account <id>'"
+                        ),
+                        "account_id": account.id,
+                    },
+                ) from exc
             return AccountInfoDto(
                 account_id=account.id,
                 account_type=account.account_type,
