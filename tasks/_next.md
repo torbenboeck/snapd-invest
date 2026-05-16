@@ -3,7 +3,7 @@
 The next available task is tracked here so agents picking up work autonomously
 can find it without scanning the directory.
 
-**Next:** `T-001-saxo-sim-integration.md`
+**Next:** `T-001-B-saxo-trading.md`
 
 When a task is completed:
 
@@ -13,11 +13,16 @@ When a task is completed:
 
 ## Current backlog (priority order)
 
-1. T-001 — Saxo SIM integration  *(needs Saxo SIM dev-app credentials from user for the optional live SIM integration test; unit tests run without)*
+1. T-001-B — Saxo SIM trading: `place_order`, `get_positions`, `get_last_price`, idempotency, MicroTrader wiring  *(needs Saxo SIM dev-app credentials from user for the optional live SIM placement test; unit tests run without)*
 2. T-002 — Real market data via yfinance
 3. T-004 — End-to-end pipeline test
 4. T-005 — Generate the .NET client from OpenAPI via NSwag
 
 ## Completed
 
-- T-003 — Wire the APScheduler into FastAPI lifespan *(2026-05-14)*
+- T-001-A — Saxo SIM OAuth + `get_account` *(2026-05-14, PR #5)*
+- T-003 — Wire the APScheduler into FastAPI lifespan *(2026-05-14, PR #2)*
+
+## Archived
+
+- T-001 — Saxo SIM integration *(superseded — split into T-001-A done + T-001-B pending; archived in `.archive/`)*
