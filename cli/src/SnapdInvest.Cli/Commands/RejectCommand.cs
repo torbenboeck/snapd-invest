@@ -6,7 +6,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class RejectCommand(IEngineApi api) : AsyncCommand<RejectCommand.Settings>
+public sealed class RejectCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<RejectCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -23,16 +24,17 @@ public sealed class RejectCommand(IEngineApi api) : AsyncCommand<RejectCommand.S
         {
             await api.RejectRecommendationAsync(
                 settings.RecommendationId,
-                new RejectRequest(settings.Reason));
+                new RejectRequest(settings.Reason),
+                cts.Token);
 
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
-                $"[grey]Rejected:[/] {settings.RecommendationId}");
+                $"[grey]Rejected:[/] {Markup.Escape(settings.RecommendationId)}");
             return 0;
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }

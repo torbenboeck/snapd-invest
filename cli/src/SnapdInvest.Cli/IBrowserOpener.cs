@@ -16,7 +16,7 @@ public sealed class DefaultBrowserOpener : IBrowserOpener
             FileName = url,
             UseShellExecute = true,
         };
-        Process.Start(psi);
+        Process.Start(psi)?.Dispose();
         return Task.CompletedTask;
     }
 }

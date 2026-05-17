@@ -5,7 +5,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class RecosCommand(IEngineApi api) : AsyncCommand<RecosCommand.Settings>
+public sealed class RecosCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<RecosCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -23,7 +24,7 @@ public sealed class RecosCommand(IEngineApi api) : AsyncCommand<RecosCommand.Set
             var status = settings.Status.Equals("all", StringComparison.OrdinalIgnoreCase)
                 ? null
                 : settings.Status;
-            var recos = await api.GetRecommendationsAsync(status, settings.Limit);
+            var recos = await api.GetRecommendationsAsync(status, settings.Limit, cts.Token);
 
             if (recos.Count == 0)
             {
@@ -42,8 +43,8 @@ public sealed class RecosCommand(IEngineApi api) : AsyncCommand<RecosCommand.Set
                     "rejected" or "expired" => "grey",
                     _ => "white",
                 };
-                var header = $" [{statusColor}]{r.Status}[/]  {r.Id}  [grey](agent={r.AgentId})[/] ";
-                var body = $"[bold]Rationale:[/]\n{r.Rationale}\n\n[bold]Signals:[/]\n{r.Signals}";
+                var header = $" [{statusColor}]{Markup.Escape(r.Status)}[/]  {Markup.Escape(r.Id)}  [grey](agent={Markup.Escape(r.AgentId)})[/] ";
+                var body = $"[bold]Rationale:[/]\n{Markup.Escape(r.Rationale)}\n\n[bold]Signals:[/]\n{Markup.Escape(r.Signals)}";
                 var panel = new Panel(body) { Header = new PanelHeader(header), Border = BoxBorder.Rounded };
                 AnsiConsole.Write(panel);
             }
@@ -51,7 +52,7 @@ public sealed class RecosCommand(IEngineApi api) : AsyncCommand<RecosCommand.Set
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }
