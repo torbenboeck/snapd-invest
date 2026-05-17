@@ -13,8 +13,11 @@ Boundary discipline:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from snapd_invest.agent import CONSERVATIVE_VALUE, ensure_default_agent, run_agent
 from snapd_invest.execution import execute_signals
@@ -22,6 +25,8 @@ from snapd_invest.recommendation import create_recommendation, expire_overdue
 from snapd_invest.strategy import SMACrossoverStrategy
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.agent import Personality
@@ -32,6 +37,24 @@ if TYPE_CHECKING:
     from snapd_invest.promotion import PromotionGate
     from snapd_invest.risk import RiskConfig
     from snapd_invest.strategy import Signal, SMACrossoverConfig
+
+
+@contextmanager
+def _bound_correlation_id(correlation_id: str | None) -> Iterator[None]:
+    """Bind `correlation_id` to structlog contextvars for the duration of a tick.
+
+    HTTP requests bind via middleware; scheduled ticks have no middleware,
+    so logs from `strategy`, `agent`, `execution`, `risk`, `broker` would
+    otherwise miss the correlation ID. Always unbinds on exit.
+    """
+    if correlation_id is None:
+        yield
+        return
+    structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
+    try:
+        yield
+    finally:
+        structlog.contextvars.unbind_contextvars("correlation_id")
 
 
 def parse_watchlist_entry(entry: str) -> tuple[str, str]:
@@ -78,30 +101,31 @@ async def run_microtrader_once(
     promotion gate, risk gate, and broker. It does NOT commit the session —
     the caller owns the transaction boundary.
     """
-    strategy = SMACrossoverStrategy(strategy_config)
-    signals = await strategy.run(
-        session,
-        account=account,
-        instrument=instrument,
-        emitted_at=clock.now(),
-        correlation_id=correlation_id,
-    )
-    outcomes = await execute_signals(
-        session, clock, broker_factory, promotion_gate, risk_config, signals
-    )
-    return MicroTraderOutcome(
-        signals=list(signals),
-        execution_summaries=[
-            {
-                "instrument": f"{o.signal.instrument_symbol}@{o.signal.instrument_exchange}",
-                "gate_allowed": o.gate_allowed,
-                "gate_reason": o.gate_reason,
-                "order_id": o.order_id,
-                "order_status": o.order_status,
-            }
-            for o in outcomes
-        ],
-    )
+    with _bound_correlation_id(correlation_id):
+        strategy = SMACrossoverStrategy(strategy_config)
+        signals = await strategy.run(
+            session,
+            account=account,
+            instrument=instrument,
+            emitted_at=clock.now(),
+            correlation_id=correlation_id,
+        )
+        outcomes = await execute_signals(
+            session, clock, broker_factory, promotion_gate, risk_config, signals
+        )
+        return MicroTraderOutcome(
+            signals=list(signals),
+            execution_summaries=[
+                {
+                    "instrument": f"{o.signal.instrument_symbol}@{o.signal.instrument_exchange}",
+                    "gate_allowed": o.gate_allowed,
+                    "gate_reason": o.gate_reason,
+                    "order_id": o.order_id,
+                    "order_status": o.order_status,
+                }
+                for o in outcomes
+            ],
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -128,32 +152,33 @@ async def run_agent_once(
 
     Does NOT commit the session — the caller owns the transaction boundary.
     """
-    agent = await ensure_default_agent(session, clock, account=account, personality=personality)
-    result = await run_agent(
-        session,
-        clock,
-        llm,
-        agent=agent,
-        personality=personality,
-        watchlist=[instrument],
-        correlation_id=correlation_id,
-    )
-    recommendation_id: str | None = None
-    if result.signals:
-        rec = await create_recommendation(
+    with _bound_correlation_id(correlation_id):
+        agent = await ensure_default_agent(session, clock, account=account, personality=personality)
+        result = await run_agent(
             session,
             clock,
-            agent_id=agent.id,
-            signals=result.signals,
-            rationale=result.summary,
+            llm,
+            agent=agent,
+            personality=personality,
+            watchlist=[instrument],
             correlation_id=correlation_id,
         )
-        recommendation_id = rec.id
-    return AgentOutcome(
-        agent_name=result.agent_name,
-        summary=result.summary,
-        recommendation_id=recommendation_id,
-    )
+        recommendation_id: str | None = None
+        if result.signals:
+            rec = await create_recommendation(
+                session,
+                clock,
+                agent_id=agent.id,
+                signals=result.signals,
+                rationale=result.summary,
+                correlation_id=correlation_id,
+            )
+            recommendation_id = rec.id
+        return AgentOutcome(
+            agent_name=result.agent_name,
+            summary=result.summary,
+            recommendation_id=recommendation_id,
+        )
 
 
 async def expire_overdue_recommendations(

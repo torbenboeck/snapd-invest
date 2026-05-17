@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -263,6 +264,72 @@ class TestApproveAndExecute:
                 RiskConfig(),
                 recommendation=rec,
             )
+
+    async def test_expired_path_does_not_mutate_before_raise(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-08: the expired path must not flush a status change before raising.
+        A caller who rolls back on the exception would otherwise undo the
+        mutation; here we just verify the status is unchanged after the raise,
+        so callers' rollback semantics stay simple."""
+        account, _, agent = await _setup_world(db_session, fake_clock)
+        rec = await create_recommendation(
+            db_session,
+            fake_clock,
+            agent_id=agent.id,
+            signals=[_signal(account.id)],
+            rationale="t",
+            ttl=timedelta(minutes=1),
+        )
+        fake_clock.advance(hours=2)
+        broker = PaperBroker(fake_clock)
+
+        with pytest.raises(ValueError, match="expired"):
+            await approve_and_execute(
+                db_session,
+                fake_clock,
+                _factory_for(broker),
+                _allow_all,
+                RiskConfig(),
+                recommendation=rec,
+            )
+        # The dedicated expire_overdue sweep is what should transition status.
+        fresh = await get_recommendation(db_session, rec.id)
+        assert fresh is not None
+        assert fresh.status == "pending"
+
+    async def test_concurrent_approve_only_one_succeeds(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-07: two concurrent approve_and_execute calls must not both
+        proceed; the conditional UPDATE serializes the transition."""
+        account, _, agent = await _setup_world(db_session, fake_clock)
+        rec = await create_recommendation(
+            db_session,
+            fake_clock,
+            agent_id=agent.id,
+            signals=[_signal(account.id)],
+            rationale="t",
+        )
+        broker = PaperBroker(fake_clock)
+
+        async def attempt() -> bool:
+            try:
+                await approve_and_execute(
+                    db_session,
+                    fake_clock,
+                    _factory_for(broker),
+                    _allow_all,
+                    RiskConfig(),
+                    recommendation=rec,
+                )
+            except ValueError:
+                return False
+            return True
+
+        results = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
+        successes = [r for r in results if r is True]
+        assert len(successes) == 1
 
 
 class TestReject:

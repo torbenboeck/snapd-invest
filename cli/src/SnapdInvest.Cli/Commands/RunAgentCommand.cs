@@ -5,7 +5,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class RunAgentCommand(IEngineApi api) : AsyncCommand<RunAgentCommand.Settings>
+public sealed class RunAgentCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<RunAgentCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -18,15 +19,16 @@ public sealed class RunAgentCommand(IEngineApi api) : AsyncCommand<RunAgentComma
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings)
     {
+        var ct = cts.Token;
         try
         {
             var result = await AnsiConsole.Status()
                 .StartAsync("Running agent (this may take a few seconds)...",
-                    async _ => await api.RunAgentAsync(settings.Symbol, settings.Exchange));
+                    async _ => await api.RunAgentAsync(settings.Symbol, settings.Exchange, ct));
 
-            var panel = new Panel(result.Summary)
+            var panel = new Panel(Markup.Escape(result.Summary))
             {
-                Header = new PanelHeader($" Agent: {result.Agent} "),
+                Header = new PanelHeader($" Agent: {Markup.Escape(result.Agent)} "),
                 Border = BoxBorder.Rounded,
             };
             AnsiConsole.Write(panel);
@@ -39,7 +41,7 @@ public sealed class RunAgentCommand(IEngineApi api) : AsyncCommand<RunAgentComma
             {
                 AnsiConsole.MarkupLineInterpolated(
                     CultureInfo.InvariantCulture,
-                    $"[green]Recommendation created:[/] {result.RecommendationId}");
+                    $"[green]Recommendation created:[/] {Markup.Escape(result.RecommendationId)}");
                 AnsiConsole.MarkupLine("Run [cyan]snapdinvest recos[/] to inspect, then [cyan]snapdinvest approve <id>[/] to execute.");
             }
 
@@ -47,7 +49,7 @@ public sealed class RunAgentCommand(IEngineApi api) : AsyncCommand<RunAgentComma
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }

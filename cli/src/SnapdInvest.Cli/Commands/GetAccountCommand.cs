@@ -9,7 +9,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class GetAccountCommand(IEngineApi api) : AsyncCommand<GetAccountCommand.Settings>
+public sealed class GetAccountCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<GetAccountCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -28,13 +29,13 @@ public sealed class GetAccountCommand(IEngineApi api) : AsyncCommand<GetAccountC
 
         try
         {
-            var info = await api.GetAccountAsync(settings.AccountId);
+            var info = await api.GetAccountAsync(settings.AccountId, cts.Token);
             var table = new Table().AddColumn("Field").AddColumn("Value");
-            table.AddRow("account_id", info.AccountId);
-            table.AddRow("account_type", info.AccountType);
-            table.AddRow("client_key", info.ClientKey ?? "—");
-            table.AddRow("user_key", info.UserKey ?? "—");
-            table.AddRow("name", info.Name ?? "—");
+            table.AddRow("account_id", Markup.Escape(info.AccountId));
+            table.AddRow("account_type", Markup.Escape(info.AccountType));
+            table.AddRow("client_key", info.ClientKey is null ? "—" : Markup.Escape(info.ClientKey));
+            table.AddRow("user_key", info.UserKey is null ? "—" : Markup.Escape(info.UserKey));
+            table.AddRow("name", info.Name is null ? "—" : Markup.Escape(info.Name));
             AnsiConsole.Write(table);
             return 0;
         }
@@ -48,13 +49,12 @@ public sealed class GetAccountCommand(IEngineApi api) : AsyncCommand<GetAccountC
             AnsiConsole.MarkupLine("[yellow]Saxo session expired or never authenticated.[/]");
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
-                $"Run: [bold]snapdinvest auth saxo --account {settings.AccountId}[/]");
+                $"Run: [bold]snapdinvest auth saxo --account {Markup.Escape(settings.AccountId)}[/]");
             return 1;
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(
-                CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }

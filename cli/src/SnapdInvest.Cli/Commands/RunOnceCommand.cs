@@ -5,7 +5,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand.Settings>
+public sealed class RunOnceCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<RunOnceCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -20,11 +21,11 @@ public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand
     {
         try
         {
-            var result = await api.RunOnceAsync(settings.Symbol, settings.Exchange);
+            var result = await api.RunOnceAsync(settings.Symbol, settings.Exchange, cts.Token);
 
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
-                $"[bold]Strategy:[/] {result.Strategy}  [grey](corr={result.CorrelationId})[/]");
+                $"[bold]Strategy:[/] {Markup.Escape(result.Strategy)}  [grey](corr={Markup.Escape(result.CorrelationId)})[/]");
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
                 $"[bold]Signals:[/] {result.Signals.Count}");
@@ -52,11 +53,11 @@ public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand
                     _ => "yellow"
                 };
                 table.AddRow(
-                    $"{s.InstrumentSymbol}@{s.InstrumentExchange}",
-                    $"[{actionColor}]{s.Action}[/]",
+                    Markup.Escape($"{s.InstrumentSymbol}@{s.InstrumentExchange}"),
+                    $"[{actionColor}]{Markup.Escape(s.Action)}[/]",
                     $"{s.Quantity:N4}",
                     $"{s.Conviction:N2}",
-                    s.Rationale);
+                    Markup.Escape(s.Rationale));
             }
 
             AnsiConsole.Write(table);
@@ -73,13 +74,13 @@ public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand
                 {
                     AnsiConsole.MarkupLineInterpolated(
                         CultureInfo.InvariantCulture,
-                        $"  [red]{instrument}[/]: blocked by risk gate ({reason})");
+                        $"  [red]{Markup.Escape(instrument)}[/]: blocked by risk gate ({Markup.Escape(reason ?? "?")})");
                 }
                 else
                 {
                     AnsiConsole.MarkupLineInterpolated(
                         CultureInfo.InvariantCulture,
-                        $"  [green]{instrument}[/]: {status}");
+                        $"  [green]{Markup.Escape(instrument)}[/]: {Markup.Escape(status)}");
                 }
             }
 
@@ -87,7 +88,7 @@ public sealed class RunOnceCommand(IEngineApi api) : AsyncCommand<RunOnceCommand
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }

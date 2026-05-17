@@ -7,7 +7,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class CreateAccountCommand(IEngineApi api) : AsyncCommand<CreateAccountCommand.Settings>
+public sealed class CreateAccountCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<CreateAccountCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -51,37 +52,38 @@ public sealed class CreateAccountCommand(IEngineApi api) : AsyncCommand<CreateAc
         {
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
-                $"[red]--type must be 'paper' or 'sim', got '{settings.AccountType}'[/]");
+                $"[red]--type must be 'paper' or 'sim', got '{Markup.Escape(settings.AccountType)}'[/]");
             return 1;
         }
 
         try
         {
-            var resp = await api.CreateAccountAsync(new CreateAccountRequest(
-                Name: settings.Name,
-                AccountType: settings.AccountType,
-                BaseCurrency: settings.BaseCurrency,
-                InitialCash: settings.InitialCash,
-                SaxoClientKey: settings.SaxoClientKey,
-                SaxoAccountKey: settings.SaxoAccountKey,
-                SaxoAccountId: settings.SaxoAccountId));
+            var resp = await api.CreateAccountAsync(
+                new CreateAccountRequest(
+                    Name: settings.Name,
+                    AccountType: settings.AccountType,
+                    BaseCurrency: settings.BaseCurrency,
+                    InitialCash: settings.InitialCash,
+                    SaxoClientKey: settings.SaxoClientKey,
+                    SaxoAccountKey: settings.SaxoAccountKey,
+                    SaxoAccountId: settings.SaxoAccountId),
+                cts.Token);
 
             var table = new Table().AddColumn("Field").AddColumn("Value");
-            table.AddRow("account_id", resp.AccountId);
-            table.AddRow("name", resp.Name);
-            table.AddRow("account_type", resp.AccountType);
-            table.AddRow("base_currency", resp.BaseCurrency);
-            table.AddRow("saxo_account_id", resp.SaxoAccountId ?? "—");
+            table.AddRow("account_id", Markup.Escape(resp.AccountId));
+            table.AddRow("name", Markup.Escape(resp.Name));
+            table.AddRow("account_type", Markup.Escape(resp.AccountType));
+            table.AddRow("base_currency", Markup.Escape(resp.BaseCurrency));
+            table.AddRow("saxo_account_id", resp.SaxoAccountId is null ? "—" : Markup.Escape(resp.SaxoAccountId));
             AnsiConsole.Write(table);
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
-                $"\n[green]Created.[/] Use [cyan]--account {resp.AccountId}[/] for subsequent commands.");
+                $"\n[green]Created.[/] Use [cyan]--account {Markup.Escape(resp.AccountId)}[/] for subsequent commands.");
             return 0;
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(
-                CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }

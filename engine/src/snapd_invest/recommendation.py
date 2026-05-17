@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from snapd_invest.audit import record_event
 from snapd_invest.execution import execute_signals
@@ -232,22 +232,44 @@ async def approve_and_execute(
     modifications: Sequence[SignalModification] = (),
 ) -> ApprovalOutcome:
     """Mark recommendation approved (or modified), then run signals through execution."""
-    if recommendation.status != "pending":
-        raise ValueError(f"recommendation {recommendation.id} is not pending")
+    # C-08: don't mutate-then-raise on expiry. The dedicated `expire_overdue`
+    # sweep transitions the status; raising here leaves the row pending so the
+    # caller's rollback semantics stay simple.
     if recommendation.expires_at < clock.now():
-        recommendation.status = "expired"
-        recommendation.resolved_at = clock.now()
-        await session.flush()
         raise ValueError(f"recommendation {recommendation.id} has expired")
 
     original_signals = _deserialize_signals(recommendation.signals)
     effective_signals = _apply_modifications(original_signals, modifications)
     has_modifications = bool(modifications)
+    new_status = "modified" if has_modifications else "approved"
+    modifications_json = (
+        json.dumps([asdict(m) for m in modifications], default=str) if has_modifications else None
+    )
+    resolved_at = clock.now()
 
-    recommendation.status = "modified" if has_modifications else "approved"
-    if has_modifications:
-        recommendation.modifications = json.dumps([asdict(m) for m in modifications], default=str)
-    recommendation.resolved_at = clock.now()
+    # C-07: atomic, race-safe transition. Only succeeds if the row is still
+    # pending. Two concurrent approvers see exactly one rowcount=1; the other
+    # gets 0 and raises.
+    result = await session.execute(
+        update(Recommendation)
+        .where(
+            Recommendation.id == recommendation.id,
+            Recommendation.status == "pending",
+        )
+        .values(
+            status=new_status,
+            modifications=modifications_json,
+            resolved_at=resolved_at,
+        )
+    )
+    rowcount: int = getattr(result, "rowcount", 0) or 0
+    if rowcount == 0:
+        raise ValueError(f"recommendation {recommendation.id} is not pending")
+
+    # Sync in-memory ORM state with what the UPDATE just wrote.
+    recommendation.status = new_status
+    recommendation.modifications = modifications_json
+    recommendation.resolved_at = resolved_at
     await session.flush()
 
     await record_event(

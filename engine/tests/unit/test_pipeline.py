@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
+import structlog
 
 from snapd_invest.agent import CONSERVATIVE_VALUE
 from snapd_invest.broker import IBroker, PaperBroker
@@ -157,6 +158,46 @@ class TestRunMicroTraderOnce:
 
         assert outcome.signals == []
         assert outcome.execution_summaries == []
+
+    async def test_binds_correlation_id_to_structlog_contextvars(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-14: scheduled ticks have no HTTP middleware to bind correlation_id.
+        The pipeline must bind it itself so inner logs carry the ID.
+
+        We assert this by intercepting the BrokerFactory: when called during
+        the tick, the current contextvars dict must contain the correlation_id.
+        """
+        account = await create_account(
+            db_session, fake_clock, name="paper", initial_cash=Decimal("100000")
+        )
+        instrument = await _seed_aapl_with_golden_cross_bars(db_session)
+        broker = PaperBroker(fake_clock)
+        observed: dict[str, str] = {}
+
+        def factory(_account: Account) -> IBroker:
+            observed.update({k: str(v) for k, v in structlog.contextvars.get_contextvars().items()})
+            return broker
+
+        # Pre-condition: no correlation_id bound on entry.
+        assert "correlation_id" not in structlog.contextvars.get_contextvars()
+
+        await run_microtrader_once(
+            db_session,
+            fake_clock,
+            factory,
+            _allow_all,
+            RiskConfig(),
+            account=account,
+            instrument=instrument,
+            strategy_config=SMACrossoverConfig(short_period=2, long_period=5),
+            correlation_id="corr-xyz",
+        )
+
+        assert observed.get("correlation_id") == "corr-xyz"
+
+        # Post-condition: helper unbound on exit.
+        assert "correlation_id" not in structlog.contextvars.get_contextvars()
 
     async def test_risk_kill_switch_rejects_signal(
         self, db_session: AsyncSession, fake_clock: FakeClock

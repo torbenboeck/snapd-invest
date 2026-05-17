@@ -14,7 +14,7 @@ public sealed class CreateAccountCommandTests
         api.CreateAccountAsync(Arg.Any<CreateAccountRequest>(), Arg.Any<CancellationToken>())
             .Returns(new CreateAccountResponse("uuid-1", "saxo-sim", "sim", "DKK", "22264911"));
 
-        var cmd = new CreateAccountCommand(api);
+        var cmd = new CreateAccountCommand(api, new CancellationTokenSource());
         var ctx = new CommandContext([], Substitute.For<IRemainingArguments>(), "create-account", null);
         var settings = new CreateAccountCommand.Settings
         {
@@ -38,7 +38,7 @@ public sealed class CreateAccountCommandTests
     public async Task ExecuteAsync_RejectsEmptyName()
     {
         var api = Substitute.For<IEngineApi>();
-        var cmd = new CreateAccountCommand(api);
+        var cmd = new CreateAccountCommand(api, new CancellationTokenSource());
         var ctx = new CommandContext([], Substitute.For<IRemainingArguments>(), "create-account", null);
 
         var exit = await cmd.ExecuteAsync(ctx, new CreateAccountCommand.Settings { Name = "" });
@@ -52,7 +52,7 @@ public sealed class CreateAccountCommandTests
     public async Task ExecuteAsync_RejectsInvalidType()
     {
         var api = Substitute.For<IEngineApi>();
-        var cmd = new CreateAccountCommand(api);
+        var cmd = new CreateAccountCommand(api, new CancellationTokenSource());
         var ctx = new CommandContext([], Substitute.For<IRemainingArguments>(), "create-account", null);
 
         var exit = await cmd.ExecuteAsync(
@@ -70,7 +70,7 @@ public sealed class CreateAccountCommandTests
         var api = Substitute.For<IEngineApi>();
         api.CreateAccountAsync(Arg.Any<CreateAccountRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<CreateAccountResponse>>(_ => throw new HttpRequestException("boom"));
-        var cmd = new CreateAccountCommand(api);
+        var cmd = new CreateAccountCommand(api, new CancellationTokenSource());
         var ctx = new CommandContext([], Substitute.For<IRemainingArguments>(), "create-account", null);
 
         var exit = await cmd.ExecuteAsync(

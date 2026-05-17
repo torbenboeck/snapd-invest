@@ -291,6 +291,13 @@ class RunOnceResponseDto(BaseModel):
     outcomes: list[dict[str, Any]]
 
 
+class RunAgentResponseDto(BaseModel):
+    correlation_id: str
+    agent: str
+    summary: str
+    recommendation_id: str | None
+
+
 class RecommendationDto(BaseModel):
     id: str
     agent_id: str
@@ -505,7 +512,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
 
     # -- Agent: run-once --
 
-    @app.post("/v1/agents/run", tags=["agent"])
+    @app.post("/v1/agents/run", response_model=RunAgentResponseDto, tags=["agent"])
     async def run_agent_route(
         request: Request,
         session: Annotated[AsyncSession, Depends(session_dep)],
@@ -513,7 +520,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         llm: Annotated[OllamaProvider, Depends(llm_dep)],
         instrument_symbol: str = "AAPL",
         instrument_exchange: str = "NASDAQ",
-    ) -> dict[str, Any]:
+    ) -> RunAgentResponseDto:
         correlation_id = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())
         account = await get_account_by_name(session, "paper")
         if account is None:
@@ -535,12 +542,12 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
             instrument=instrument,
             correlation_id=correlation_id,
         )
-        return {
-            "correlation_id": correlation_id,
-            "agent": outcome.agent_name,
-            "summary": outcome.summary,
-            "recommendation_id": outcome.recommendation_id,
-        }
+        return RunAgentResponseDto(
+            correlation_id=correlation_id,
+            agent=outcome.agent_name,
+            summary=outcome.summary,
+            recommendation_id=outcome.recommendation_id,
+        )
 
     # -- Recommendations --
 

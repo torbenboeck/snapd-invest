@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import re
@@ -374,3 +375,63 @@ class TestGetActiveAccessToken:
                     account_id=account.id,
                     broker="saxo",
                 )
+
+    @respx.mock
+    async def test_concurrent_callers_refresh_only_once(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-02: Saxo refresh tokens are single-use; concurrent callers must
+        serialize so only one actually calls /token."""
+        cipher = FernetCipher(Fernet.generate_key())
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=TokenSet(
+                access_token="almost-expired",
+                refresh_token="r1",
+                access_expires_at=fake_clock.now() + timedelta(seconds=30),
+                refresh_expires_at=fake_clock.now() + timedelta(seconds=86400),
+            ),
+        )
+
+        route = respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "fresh",
+                    "refresh_token": "r2",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 86400,
+                    "token_type": "Bearer",
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            results = await asyncio.gather(
+                get_active_access_token(
+                    db_session,
+                    fake_clock,
+                    client,
+                    cipher,
+                    client_id="client-123",
+                    account_id=account.id,
+                    broker="saxo",
+                ),
+                get_active_access_token(
+                    db_session,
+                    fake_clock,
+                    client,
+                    cipher,
+                    client_id="client-123",
+                    account_id=account.id,
+                    broker="saxo",
+                ),
+            )
+
+        assert route.call_count == 1
+        assert results == ["fresh", "fresh"]
