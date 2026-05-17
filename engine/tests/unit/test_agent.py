@@ -183,6 +183,39 @@ class TestRunAgent:
                 watchlist=[instrument],
             )
 
+    async def test_empty_watchlist_yields_no_signals(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-22: an agent run with an empty watchlist drops every LLM signal
+        (off-watchlist), regardless of what the LLM produced."""
+        _, _, agent = await _setup_world(db_session, fake_clock)
+        llm = FakeLlmProvider()
+        llm.enqueue_json(
+            {
+                "summary": "would have bought AAPL",
+                "signals": [
+                    {
+                        "instrument_symbol": "AAPL",
+                        "instrument_exchange": "NASDAQ",
+                        "action": "buy",
+                        "quantity": 1,
+                        "conviction": 0.9,
+                        "rationale": "x",
+                    }
+                ],
+            }
+        )
+
+        result = await run_agent(
+            db_session,
+            fake_clock,
+            llm,
+            agent=agent,
+            personality=CONSERVATIVE_VALUE,
+            watchlist=[],
+        )
+        assert result.signals == []
+
     async def test_custom_personality(
         self, db_session: AsyncSession, fake_clock: FakeClock
     ) -> None:

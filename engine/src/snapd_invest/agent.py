@@ -277,6 +277,8 @@ async def run_agent(
                 account_id=account.id,
                 instrument_symbol=instrument_symbol,
                 instrument_exchange=instrument_exchange,
+                # action is validated against {"buy","sell","hold"} above, but
+                # mypy can't narrow `str` to the SignalAction Literal here.
                 action=action,  # type: ignore[arg-type]
                 quantity=quantity,
                 conviction=conviction,
