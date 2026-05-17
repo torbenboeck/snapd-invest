@@ -89,11 +89,12 @@ builds it via `ConfigurationBuilder` from these sources, in increasing priority
    `SNAPDINVEST_Engine__Url` (double underscore maps to `:` per .NET
    configuration conventions; the prefix is stripped before binding).
 3. Command-line args — pass `--Engine:Url <value>` (literal colon, the form
-   `AddCommandLine` understands). There is no kebab-case `--engine-url` alias.
-4. Fallback in `Program.cs`: `http://localhost:8000` when none of the above are set.
-
-If you want a friendlier `--engine-url` flag, see the open follow-up captured
-in the 2026-05-16 architectural review under F-08 — it's deferred.
+   `AddCommandLine` understands).
+4. **`--engine-url <value>`** — friendly kebab-case alias for `--Engine:Url`.
+   Implemented as an arg preprocessor in `Program.cs` that pulls the value
+   out of `args` and injects it as in-memory config. Highest priority of all
+   command-line sources.
+5. Fallback in `Program.cs`: `http://localhost:8000` when none of the above are set.
 
 ---
 

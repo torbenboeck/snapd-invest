@@ -29,6 +29,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="SnapdInvest.Cli.Tests.Unit" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
