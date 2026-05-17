@@ -166,6 +166,9 @@ class PaperBroker:
                     request.quantity * fill_price
                 )
                 position.avg_cost = total_cost / new_qty
+            # NB: avg_cost is preserved on sells (including sell-to-zero). It's
+            # the cost basis used by the daily-loss circuit breaker in risk.py
+            # to compute realized P&L from today's sell trades.
             position.quantity = new_qty
             position.updated_at = self._clock.now()
         await session.flush()

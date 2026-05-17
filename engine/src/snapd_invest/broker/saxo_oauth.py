@@ -15,6 +15,7 @@ All tokens are encrypted at rest via `Cipher`. Plaintext never persists.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import secrets
@@ -39,13 +40,33 @@ HTTP_BAD_REQUEST = 400
 
 
 def _as_utc(dt: datetime) -> datetime:
-    """Reinterpret a naive datetime from SQLite as UTC.
+    """Reinterpret a naive datetime from SQLite as UTC, normalize tz-aware to UTC.
 
-    The schema declares `DateTime(timezone=True)` and we always store UTC,
-    but SQLite's storage layer returns naive datetimes. Treat them as UTC
-    rather than crashing on tz-aware comparisons.
+    The schema declares `DateTime(timezone=True)` and we always store UTC, but
+    SQLite's storage layer returns naive datetimes. Treat naive as UTC, and
+    convert any aware datetime to UTC so arithmetic with `clock.now()`
+    (always UTC) is correct regardless of the producer's tz.
     """
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+# Per (account_id, broker) lock that serializes token-refresh attempts. Saxo's
+# refresh tokens are single-use: two concurrent refreshes would both load the
+# same refresh_token, but only the first would succeed; the second receives a
+# 400. Single-process scope only — multi-worker deployments need a row-level
+# DB lock or external coordinator.
+_REFRESH_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _refresh_lock_for(account_id: str, broker: str) -> asyncio.Lock:
+    key = (account_id, broker)
+    lock = _REFRESH_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _REFRESH_LOCKS[key] = lock
+    return lock
 
 
 SIM_AUTHORIZE_URL = "https://sim.logonvalidation.net/authorize"
@@ -296,8 +317,10 @@ async def get_active_access_token(
     """Return a usable access token for `(account_id, broker)`.
 
     Refreshes proactively if the stored token expires within
-    `REFRESH_BUFFER_SECONDS`. Raises `BrokerAuthError` if no tokens are
-    stored, or if a refresh attempt fails.
+    `REFRESH_BUFFER_SECONDS`. A per-account lock serializes refreshes so a
+    second caller in the same window sees the already-refreshed token instead
+    of attempting a second refresh (Saxo refresh tokens are single-use).
+    Raises `BrokerAuthError` if no tokens are stored, or if refresh fails.
     """
     stored = await load_tokens(session, cipher, account_id=account_id, broker=broker)
     if stored is None:
@@ -309,15 +332,27 @@ async def get_active_access_token(
     if (stored.access_expires_at - clock.now()).total_seconds() > REFRESH_BUFFER_SECONDS:
         return stored.access_token
 
-    fresh = await refresh_tokens(
-        client, clock, client_id=client_id, refresh_token=stored.refresh_token
-    )
-    await store_tokens(
-        session,
-        clock,
-        cipher,
-        account_id=account_id,
-        broker=broker,
-        tokens=fresh,
-    )
-    return fresh.access_token
+    async with _refresh_lock_for(account_id, broker):
+        # Double-check inside the lock: if another caller refreshed while we
+        # were waiting, use that token instead of refreshing again.
+        stored = await load_tokens(session, cipher, account_id=account_id, broker=broker)
+        if stored is None:
+            raise BrokerAuthError(
+                f"no stored tokens for account_id={account_id} broker={broker}; "
+                f"complete OAuth first via /v1/oauth/saxo/start"
+            )
+        if (stored.access_expires_at - clock.now()).total_seconds() > REFRESH_BUFFER_SECONDS:
+            return stored.access_token
+
+        fresh = await refresh_tokens(
+            client, clock, client_id=client_id, refresh_token=stored.refresh_token
+        )
+        await store_tokens(
+            session,
+            clock,
+            cipher,
+            account_id=account_id,
+            broker=broker,
+            tokens=fresh,
+        )
+        return fresh.access_token
