@@ -16,7 +16,7 @@ public sealed class GetAccountCommandTests
         api.GetAccountAsync("acc-1", Arg.Any<CancellationToken>())
             .Returns(new AccountInfoResponse("acc-1", "sim", "client-key", "user-key", "Torben"));
 
-        var cmd = new GetAccountCommand(api);
+        var cmd = new GetAccountCommand(api, new CancellationTokenSource());
         var settings = new GetAccountCommand.Settings { AccountId = "acc-1" };
         var context = new CommandContext([], Substitute.For<IRemainingArguments>(), "get-account", null);
 
@@ -29,7 +29,7 @@ public sealed class GetAccountCommandTests
     public async Task ExecuteAsync_RejectsEmptyAccount()
     {
         var api = Substitute.For<IEngineApi>();
-        var cmd = new GetAccountCommand(api);
+        var cmd = new GetAccountCommand(api, new CancellationTokenSource());
         var context = new CommandContext([], Substitute.For<IRemainingArguments>(), "get-account", null);
 
         var exitCode = await cmd.ExecuteAsync(context, new GetAccountCommand.Settings { AccountId = "" });
@@ -45,7 +45,7 @@ public sealed class GetAccountCommandTests
         api.GetAccountAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns<Task<AccountInfoResponse>>(_ => throw new HttpRequestException("boom"));
 
-        var cmd = new GetAccountCommand(api);
+        var cmd = new GetAccountCommand(api, new CancellationTokenSource());
         var context = new CommandContext([], Substitute.For<IRemainingArguments>(), "get-account", null);
 
         var exitCode = await cmd.ExecuteAsync(context, new GetAccountCommand.Settings { AccountId = "x" });
@@ -64,7 +64,7 @@ public sealed class GetAccountCommandTests
         api.GetAccountAsync(accountId, Arg.Any<CancellationToken>())
             .Returns<Task<AccountInfoResponse>>(_ => throw apiException);
 
-        var cmd = new GetAccountCommand(api);
+        var cmd = new GetAccountCommand(api, new CancellationTokenSource());
         var context = new CommandContext([], Substitute.For<IRemainingArguments>(), "get-account", null);
 
         var exitCode = await cmd.ExecuteAsync(context, new GetAccountCommand.Settings { AccountId = accountId });

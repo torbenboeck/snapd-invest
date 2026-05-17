@@ -6,7 +6,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand.Settings>
+public sealed class ApproveCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<ApproveCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -36,11 +37,12 @@ public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand
 
             var response = await api.ApproveRecommendationAsync(
                 settings.RecommendationId,
-                new ApproveRequest(mods.Count == 0 ? null : mods));
+                new ApproveRequest(mods.Count == 0 ? null : mods),
+                cts.Token);
 
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
-                $"[green]Status:[/] {response.Status}  [grey](id={response.RecommendationId})[/]");
+                $"[green]Status:[/] {Markup.Escape(response.Status)}  [grey](id={Markup.Escape(response.RecommendationId)})[/]");
 
             foreach (var o in response.ExecutionSummaries)
             {
@@ -52,13 +54,13 @@ public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand
                     var reason = o.TryGetValue("gate_reason", out var r) ? r?.ToString() : "?";
                     AnsiConsole.MarkupLineInterpolated(
                         CultureInfo.InvariantCulture,
-                        $"  [red]{instrument}[/]: blocked ({reason})");
+                        $"  [red]{Markup.Escape(instrument)}[/]: blocked ({Markup.Escape(reason ?? "?")})");
                 }
                 else
                 {
                     AnsiConsole.MarkupLineInterpolated(
                         CultureInfo.InvariantCulture,
-                        $"  [green]{instrument}[/]: {status}");
+                        $"  [green]{Markup.Escape(instrument)}[/]: {Markup.Escape(status)}");
                 }
             }
 
@@ -66,12 +68,12 @@ public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }
 
-    private static List<SignalModificationDto> ParseModifications(string[] inputs)
+    internal static List<SignalModificationDto> ParseModifications(string[] inputs)
     {
         var result = new List<SignalModificationDto>();
         foreach (var raw in inputs)
@@ -91,7 +93,7 @@ public sealed class ApproveCommand(IEngineApi api) : AsyncCommand<ApproveCommand
             {
                 result.Add(new SignalModificationDto(instr[0], instr[1], null, true));
             }
-            else if (decimal.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var qty))
+            else if (decimal.TryParse(value, CultureInfo.InvariantCulture, out var qty))
             {
                 result.Add(new SignalModificationDto(instr[0], instr[1], qty, false));
             }

@@ -6,7 +6,7 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class AuthSaxoCommand(IEngineApi api, IBrowserOpener browser)
+public sealed class AuthSaxoCommand(IEngineApi api, IBrowserOpener browser, CancellationTokenSource cts)
     : AsyncCommand<AuthSaxoCommand.Settings>
 {
     public sealed class Settings : CommandSettings
@@ -32,31 +32,38 @@ public sealed class AuthSaxoCommand(IEngineApi api, IBrowserOpener browser)
             return 1;
         }
 
+        var ct = cts.Token;
         try
         {
-            var start = await api.StartSaxoOAuthAsync(settings.AccountId);
+            var start = await api.StartSaxoOAuthAsync(settings.AccountId, ct);
             AnsiConsole.MarkupLineInterpolated(
-                CultureInfo.InvariantCulture, $"[grey]Opening browser to:[/] {start.AuthorizeUrl}");
-            await browser.OpenAsync(start.AuthorizeUrl);
+                CultureInfo.InvariantCulture,
+                $"[grey]Opening browser to:[/] {Markup.Escape(start.AuthorizeUrl)}");
+            await browser.OpenAsync(start.AuthorizeUrl, ct);
 
             for (var i = 0; i < settings.MaxAttempts; i++)
             {
-                var status = await api.GetSaxoOAuthStatusAsync(settings.AccountId);
+                ct.ThrowIfCancellationRequested();
+                var status = await api.GetSaxoOAuthStatusAsync(settings.AccountId, ct);
                 if (status.Authenticated)
                 {
                     AnsiConsole.MarkupLine("[green]Tokens stored.[/]");
                     return 0;
                 }
-                await Task.Delay(settings.PollIntervalMs);
+                await Task.Delay(settings.PollIntervalMs, ct);
             }
 
             AnsiConsole.MarkupLine("[red]Timed out waiting for OAuth consent.[/]");
             return 1;
         }
+        catch (OperationCanceledException)
+        {
+            AnsiConsole.MarkupLine("[yellow]Cancelled.[/]");
+            return 130;
+        }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(
-                CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }

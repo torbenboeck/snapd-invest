@@ -5,7 +5,8 @@ using Spectre.Console.Cli;
 
 namespace SnapdInvest.Cli.Commands;
 
-public sealed class StatusCommand(IEngineApi api) : AsyncCommand<StatusCommand.Settings>
+public sealed class StatusCommand(IEngineApi api, CancellationTokenSource cts)
+    : AsyncCommand<StatusCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
@@ -15,13 +16,14 @@ public sealed class StatusCommand(IEngineApi api) : AsyncCommand<StatusCommand.S
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings)
     {
+        var ct = cts.Token;
         try
         {
-            var portfolio = await api.GetPortfolioAsync(settings.AccountName);
-            var pendingRecos = await api.GetRecommendationsAsync(status: "pending", limit: 10);
+            var portfolio = await api.GetPortfolioAsync(settings.AccountName, ct);
+            var pendingRecos = await api.GetRecommendationsAsync(status: "pending", limit: 10, ct: ct);
 
             var summaryPanel = new Panel(
-                $"[bold]Account:[/] {portfolio.AccountName} ({portfolio.BaseCurrency})\n" +
+                $"[bold]Account:[/] {Markup.Escape(portfolio.AccountName)} ({Markup.Escape(portfolio.BaseCurrency)})\n" +
                 $"[bold]Cash:[/]    {portfolio.Cash:N2}\n" +
                 $"[bold]Equity:[/]  {(portfolio.Equity?.ToString("N2", CultureInfo.InvariantCulture) ?? "[grey]n/a[/]")}")
             {
@@ -47,13 +49,13 @@ public sealed class StatusCommand(IEngineApi api) : AsyncCommand<StatusCommand.S
                 {
                     var pnlColor = (p.UnrealizedPnl ?? 0) >= 0 ? "green" : "red";
                     table.AddRow(
-                        $"{p.InstrumentSymbol}@{p.InstrumentExchange}",
+                        Markup.Escape($"{p.InstrumentSymbol}@{p.InstrumentExchange}"),
                         $"{p.Quantity:N4}",
                         $"{p.AvgCost:N2}",
                         p.LastPrice?.ToString("N2", CultureInfo.InvariantCulture) ?? "[grey]?[/]",
                         p.MarketValue?.ToString("N2", CultureInfo.InvariantCulture) ?? "[grey]?[/]",
                         $"[{pnlColor}]{p.UnrealizedPnl?.ToString("N2", CultureInfo.InvariantCulture) ?? "?"}[/]",
-                        p.Tag);
+                        Markup.Escape(p.Tag));
                 }
 
                 AnsiConsole.Write(table);
@@ -72,7 +74,7 @@ public sealed class StatusCommand(IEngineApi api) : AsyncCommand<StatusCommand.S
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLineInterpolated(CultureInfo.InvariantCulture, $"[red]Error:[/] {ex.Message}");
+            CliErrors.Render(ex);
             return 1;
         }
     }
