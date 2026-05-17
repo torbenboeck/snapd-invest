@@ -217,6 +217,7 @@ async def execute_signal(
             quantity=signal.quantity,
             reference_price=signal.reference_price,
         ),
+        clock=clock,
     )
     await record_event(
         session,
