@@ -57,6 +57,16 @@ class SaxoAccountInfo:
     name: str
 
 
+@dataclass(slots=True, frozen=True)
+class SaxoInstrumentHit:
+    """One result row from `/ref/v1/instruments`."""
+
+    uic: int
+    symbol: str
+    asset_type: str
+    description: str
+
+
 class SaxoBroker:
     """SaxoBroker — IBroker against Saxo SIM. T-001-A: get_account only."""
 
@@ -88,6 +98,24 @@ class SaxoBroker:
             user_key=payload["UserKey"],
             name=payload.get("Name", ""),
         )
+
+    async def search_instruments(
+        self, session: AsyncSession, keywords: str, *, asset_type: str
+    ) -> list[SaxoInstrumentHit]:
+        """Search `/ref/v1/instruments` by keyword and asset type."""
+        payload = await self._authed_get(
+            session,
+            f"/ref/v1/instruments?KeyWords={keywords}&AssetTypes={asset_type}",
+        )
+        return [
+            SaxoInstrumentHit(
+                uic=int(row["Identifier"]),
+                symbol=row["Symbol"],
+                asset_type=row["AssetType"],
+                description=row.get("Description", ""),
+            )
+            for row in payload.get("Data", [])
+        ]
 
     async def place_order(self, session: AsyncSession, request: OrderRequest) -> OrderResult:
         """T-001-B will implement order placement against Saxo SIM."""

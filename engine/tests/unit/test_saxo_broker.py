@@ -1,4 +1,4 @@
-"""Tests for `snapd_invest.broker.saxo.SaxoBroker.get_account`."""
+"""Tests for `snapd_invest.broker.saxo.SaxoBroker`."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import respx
 from cryptography.fernet import Fernet
 
 from snapd_invest.broker import BrokerAuthError, BrokerHttpError
-from snapd_invest.broker.saxo import SAXO_SIM_API_BASE, SaxoBroker
+from snapd_invest.broker.saxo import SAXO_SIM_API_BASE, SaxoBroker, SaxoInstrumentHit
 from snapd_invest.broker.saxo_oauth import (
     SIM_TOKEN_URL,
     TokenSet,
@@ -158,3 +158,66 @@ class TestSaxoBrokerGetAccount:
             with pytest.raises(BrokerHttpError) as exc_info:
                 await broker.get_account(db_session)
         assert exc_info.value.status_code == 503
+
+
+INSTRUMENTS_URL = f"{SAXO_SIM_API_BASE}/ref/v1/instruments"
+
+
+class TestSaxoBrokerSearchInstruments:
+    @respx.mock
+    async def test_search_instruments_happy_path(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+        respx.get(INSTRUMENTS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "Identifier": 16,
+                            "Symbol": "EURDKK",
+                            "AssetType": "FxSpot",
+                            "Description": "Euro/Danish Krone",
+                            "CurrencyCode": "DKK",
+                        },
+                    ],
+                },
+            )
+        )
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            results = await broker.search_instruments(db_session, "EURDKK", asset_type="FxSpot")
+
+        assert len(results) == 1
+        assert results[0].uic == 16
+        assert results[0].symbol == "EURDKK"
+        assert results[0].asset_type == "FxSpot"
+        assert results[0].description == "Euro/Danish Krone"
+        assert isinstance(results[0], SaxoInstrumentHit)
+
+    @respx.mock
+    async def test_search_instruments_empty_data_returns_empty_list(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+        respx.get(INSTRUMENTS_URL).mock(return_value=httpx.Response(200, json={"Data": []}))
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            results = await broker.search_instruments(db_session, "UNKNOWN", asset_type="Stock")
+
+        assert results == []
