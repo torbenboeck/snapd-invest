@@ -35,6 +35,7 @@ from snapd_invest.broker import (
 )
 from snapd_invest.broker.saxo_oauth import (
     SIM_AUTHORIZE_URL,
+    backfill_saxo_identity,
     consume_oauth_state,
     exchange_code_for_tokens,
     generate_pkce,
@@ -710,6 +711,28 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
             broker=consumed.broker,
             tokens=tokens,
         )
+
+        # Best-effort identity backfill. If Saxo's /clients/me or /accounts/me
+        # is unavailable right now, persist tokens anyway — the user can
+        # re-authenticate later and we'll retry. Identity is required for
+        # placement (T-001-B) but not for the callback itself succeeding.
+        account = (
+            await session.execute(select(Account).where(Account.id == consumed.account_id))
+        ).scalar_one_or_none()
+        if account is not None:
+            try:
+                await backfill_saxo_identity(
+                    session,
+                    saxo_http_client,
+                    access_token=tokens.access_token,
+                    account=account,
+                )
+            except BrokerAuthError as exc:
+                log.warning(
+                    "saxo_identity_backfill_failed",
+                    account_id=account.id,
+                    reason=str(exc),
+                )
         return HTMLResponse(_CALLBACK_HTML)
 
     @app.get("/v1/oauth/saxo/status", response_model=OAuthStatusResponse, tags=["oauth"])

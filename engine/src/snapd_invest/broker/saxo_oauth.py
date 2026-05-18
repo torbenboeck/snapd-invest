@@ -20,7 +20,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 
@@ -33,9 +33,15 @@ if TYPE_CHECKING:
 
     from snapd_invest.clock import Clock
     from snapd_invest.crypto import Cipher
+    from snapd_invest.models import Account
 
 
 HTTP_BAD_REQUEST = 400
+
+# OpenAPI base — duplicated from `broker/saxo.py` to avoid a circular import
+# (saxo.py imports from saxo_oauth, not vice versa). The value is stable across
+# Saxo deployments; if it ever moves, update both constants.
+SIM_OPENAPI_BASE = "https://gateway.saxobank.com/sim/openapi"
 
 
 def _as_utc(dt: datetime) -> datetime:
@@ -281,6 +287,71 @@ async def refresh_tokens(
         access_expires_at=now + timedelta(seconds=int(payload["expires_in"])),
         refresh_expires_at=now + timedelta(seconds=int(payload["refresh_token_expires_in"])),
     )
+
+
+# ----------------------------------------------------------------------------
+# Identity backfill (post-OAuth, populates Account.saxo_* columns)
+# ----------------------------------------------------------------------------
+
+
+async def fetch_client_info(client: httpx.AsyncClient, *, access_token: str) -> dict[str, Any]:
+    """GET /port/v1/clients/me — ClientKey, ClientId, DefaultAccountId, etc."""
+    response = await client.get(
+        f"{SIM_OPENAPI_BASE}/port/v1/clients/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if response.status_code >= HTTP_BAD_REQUEST:
+        raise BrokerAuthError(
+            f"saxo /clients/me failed: {response.status_code} {response.text[:200]}"
+        )
+    payload: dict[str, Any] = response.json()
+    return payload
+
+
+async def fetch_accounts_info(client: httpx.AsyncClient, *, access_token: str) -> dict[str, Any]:
+    """GET /port/v1/accounts/me — list of accounts under the client."""
+    response = await client.get(
+        f"{SIM_OPENAPI_BASE}/port/v1/accounts/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if response.status_code >= HTTP_BAD_REQUEST:
+        raise BrokerAuthError(
+            f"saxo /accounts/me failed: {response.status_code} {response.text[:200]}"
+        )
+    payload: dict[str, Any] = response.json()
+    return payload
+
+
+async def backfill_saxo_identity(
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    account: Account,
+) -> None:
+    """Populate `account.saxo_client_key` + `.saxo_account_key` from Saxo.
+
+    Strategy: ClientKey from `/clients/me`. AccountKey by matching the row's
+    `saxo_account_id` (user-supplied at create-account time) against
+    `/accounts/me`. Falls back to the Client's `DefaultAccountId` when the
+    account row didn't carry one. Leaves `saxo_account_key` null if no match
+    — the caller logs an audit event; user can re-auth or correct the id.
+    """
+    client_info = await fetch_client_info(client, access_token=access_token)
+    accounts_info = await fetch_accounts_info(client, access_token=access_token)
+
+    account.saxo_client_key = client_info.get("ClientKey")
+
+    preferred_id = account.saxo_account_id or client_info.get("DefaultAccountId")
+    accounts_data = accounts_info.get("Data", [])
+    match = next(
+        (a for a in accounts_data if a.get("AccountId") == preferred_id),
+        None,
+    )
+    if match is not None:
+        account.saxo_account_key = match.get("AccountKey")
+        account.saxo_account_id = match.get("AccountId")
+    await session.flush()
 
 
 async def get_active_access_token(
