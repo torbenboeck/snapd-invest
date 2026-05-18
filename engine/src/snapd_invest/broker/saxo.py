@@ -12,6 +12,7 @@ on every call; this keeps the broker stateless and concurrency-safe.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -29,10 +30,9 @@ from snapd_invest.broker.saxo_oauth import (
     refresh_tokens,
     store_tokens,
 )
+from snapd_invest.models import Account
 
 if TYPE_CHECKING:
-    from decimal import Decimal
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from snapd_invest.clock import Clock
@@ -124,10 +124,51 @@ class SaxoBroker:
     async def get_last_price(
         self, session: AsyncSession, *, instrument: Instrument
     ) -> Decimal | None:
-        """T-001-B will implement price fetching against Saxo SIM."""
-        raise NotImplementedError(
-            "SaxoBroker.get_last_price arrives in T-001-B (paper-only at MVP)"
+        """Fetch the mid of bid/ask for `instrument` via `/trade/v1/infoprices/list`.
+
+        Returns None if Saxo returns no quote (e.g. closed market with no
+        snapshot). Raises ValueError if the instrument hasn't been resolved
+        against Saxo yet (call `ensure_saxo_instrument` first) and
+        BrokerAuthError if the account is missing its `saxo_account_key`.
+        """
+        if instrument.saxo_uic is None:
+            raise ValueError(
+                f"instrument {instrument.symbol}@{instrument.exchange} has no saxo_uic; "
+                "call ensure_saxo_instrument first"
+            )
+        account_key = await self._account_key(session)
+        payload = await self._authed_get(
+            session,
+            f"/trade/v1/infoprices/list?AccountKey={account_key}"
+            f"&Uics={instrument.saxo_uic}"
+            f"&AssetType={instrument.saxo_asset_type}"
+            f"&Amount=1"
+            f"&FieldGroups=DisplayAndFormat,Quote",
         )
+        data = payload.get("Data", [])
+        if not data:
+            return None
+        quote = data[0].get("Quote", {})
+        bid = quote.get("Bid")
+        ask = quote.get("Ask")
+        if bid is None or ask is None:
+            return None
+        return (Decimal(str(bid)) + Decimal(str(ask))) / Decimal(2)
+
+    async def _account_key(self, session: AsyncSession) -> str:
+        """Load this broker's account's `saxo_account_key` from the DB.
+
+        Trading-side calls (place_order, get_last_price, cancel_order)
+        require the AccountKey opaque token captured during OAuth identity
+        backfill. If it's missing the user has to re-authenticate.
+        """
+        account = await session.get(Account, self._account_id)
+        if account is None or account.saxo_account_key is None:
+            raise BrokerAuthError(
+                f"account {self._account_id} has no saxo_account_key; "
+                "re-authenticate via 'snapdinvest auth saxo --account ...'"
+            )
+        return account.saxo_account_key
 
     async def _authed_get(self, session: AsyncSession, path: str) -> dict[str, Any]:
         token = await get_active_access_token(

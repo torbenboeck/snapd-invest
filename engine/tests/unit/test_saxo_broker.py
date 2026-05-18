@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import httpx
@@ -19,6 +20,7 @@ from snapd_invest.broker.saxo_oauth import (
     store_tokens,
 )
 from snapd_invest.crypto import FernetCipher
+from snapd_invest.models import Account, Instrument
 from snapd_invest.portfolio import create_account
 
 if TYPE_CHECKING:
@@ -31,9 +33,16 @@ ACCOUNTS_ME_URL = f"{SAXO_SIM_API_BASE}/port/v1/users/me"
 
 
 async def _seed_tokens(
-    db_session: AsyncSession, fake_clock: FakeClock, cipher: FernetCipher
+    db_session: AsyncSession,
+    fake_clock: FakeClock,
+    cipher: FernetCipher,
+    *,
+    saxo_account_key: str | None = None,
 ) -> str:
     account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+    if saxo_account_key is not None:
+        account.saxo_account_key = saxo_account_key
+        await db_session.flush()
     await store_tokens(
         db_session,
         fake_clock,
@@ -221,3 +230,128 @@ class TestSaxoBrokerSearchInstruments:
             results = await broker.search_instruments(db_session, "UNKNOWN", asset_type="Stock")
 
         assert results == []
+
+
+INFOPRICES_URL = f"{SAXO_SIM_API_BASE}/trade/v1/infoprices/list"
+
+
+def _eurdkk_instrument(*, saxo_uic: int | None = 16) -> Instrument:
+    return Instrument(
+        symbol="EURDKK",
+        exchange="FX",
+        instrument_type="fx",
+        currency="DKK",
+        tick_size=Decimal("0.00001"),
+        saxo_uic=saxo_uic,
+        saxo_asset_type="FxSpot" if saxo_uic is not None else None,
+        saxo_currency_decimals=4 if saxo_uic is not None else None,
+    )
+
+
+class TestSaxoBrokerGetLastPrice:
+    @respx.mock
+    async def test_get_last_price_returns_mid_of_bid_ask(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        respx.get(INFOPRICES_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "Uic": 16,
+                            "AssetType": "FxSpot",
+                            "Quote": {"Bid": 7.47335, "Ask": 7.47385, "Mid": 7.47360},
+                        },
+                    ],
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            price = await broker.get_last_price(db_session, instrument=_eurdkk_instrument())
+
+        assert price == Decimal("7.47360")
+
+    @respx.mock
+    async def test_get_last_price_empty_data_returns_none(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        respx.get(INFOPRICES_URL).mock(return_value=httpx.Response(200, json={"Data": []}))
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            price = await broker.get_last_price(db_session, instrument=_eurdkk_instrument())
+
+        assert price is None
+
+    async def test_get_last_price_missing_saxo_uic_raises(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            with pytest.raises(ValueError, match="saxo_uic"):
+                await broker.get_last_price(
+                    db_session, instrument=_eurdkk_instrument(saxo_uic=None)
+                )
+
+    async def test_get_last_price_missing_saxo_account_key_raises_auth_error(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            with pytest.raises(BrokerAuthError, match="saxo_account_key"):
+                await broker.get_last_price(db_session, instrument=_eurdkk_instrument())
+
+    async def test_account_loaded_for_each_call(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """Sanity: Account row carries the saxo_account_key the broker reads."""
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        account = await db_session.get(Account, account_id)
+        assert account is not None
+        assert account.saxo_account_key == "acc-key-1"
