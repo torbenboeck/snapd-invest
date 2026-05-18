@@ -12,6 +12,7 @@ from snapd_invest.agent import ensure_default_agent
 from snapd_invest.broker import PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.portfolio import create_account
+from snapd_invest.promotion import Allowed
 from snapd_invest.recommendation import (
     SignalModification,
     approve_and_execute,
@@ -137,7 +138,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            broker,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
             RiskConfig(),
             recommendation=rec,
         )
@@ -161,7 +163,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            broker,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
             RiskConfig(),
             recommendation=rec,
             modifications=[
@@ -189,7 +192,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            broker,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
             RiskConfig(),
             recommendation=rec,
             modifications=[
@@ -214,11 +218,23 @@ class TestApproveAndExecute:
             rationale="t",
         )
         broker = PaperBroker(fake_clock)
-        await approve_and_execute(db_session, fake_clock, broker, RiskConfig(), recommendation=rec)
+        await approve_and_execute(
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(),
+            recommendation=rec,
+        )
         # Try again
         with pytest.raises(ValueError, match="not pending"):
             await approve_and_execute(
-                db_session, fake_clock, broker, RiskConfig(), recommendation=rec
+                db_session,
+                fake_clock,
+                lambda _account: broker,
+                lambda _account, _broker: Allowed(),
+                RiskConfig(),
+                recommendation=rec,
             )
 
     async def test_rejects_expired(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
@@ -236,7 +252,12 @@ class TestApproveAndExecute:
 
         with pytest.raises(ValueError, match="expired"):
             await approve_and_execute(
-                db_session, fake_clock, broker, RiskConfig(), recommendation=rec
+                db_session,
+                fake_clock,
+                lambda _account: broker,
+                lambda _account, _broker: Allowed(),
+                RiskConfig(),
+                recommendation=rec,
             )
 
 

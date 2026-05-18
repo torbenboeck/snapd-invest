@@ -19,6 +19,7 @@ from snapd_invest.pipeline import (
     run_microtrader_once,
 )
 from snapd_invest.portfolio import create_account
+from snapd_invest.promotion import Allowed
 from snapd_invest.recommendation import create_recommendation
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal, SMACrossoverConfig
@@ -105,7 +106,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            broker,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
             RiskConfig(),
             account=account,
             instrument=instrument,
@@ -133,7 +135,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            broker,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
             RiskConfig(),
             account=account,
             instrument=instrument,
@@ -159,7 +162,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            broker,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
             RiskConfig(kill_switch=True),
             account=account,
             instrument=instrument,

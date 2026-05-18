@@ -14,6 +14,7 @@ from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.execution import execute_signal
 from snapd_invest.models import Order, Position
 from snapd_invest.portfolio import create_account
+from snapd_invest.promotion import Allowed
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal
 
@@ -80,7 +81,14 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)
 
-        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(),
+            signal,
+        )
 
         assert outcome.gate_allowed
         assert outcome.order_status == "filled"
@@ -98,7 +106,12 @@ class TestExecuteSignal:
         signal = _setup_signal(account.id)
 
         outcome = await execute_signal(
-            db_session, fake_clock, broker, RiskConfig(kill_switch=True), signal
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(kill_switch=True),
+            signal,
         )
 
         assert not outcome.gate_allowed
@@ -113,7 +126,14 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)
 
-        await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        await execute_signal(
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(),
+            signal,
+        )
         await db_session.commit()
 
         events = await list_events(db_session, correlation_id="corr-1")
@@ -129,8 +149,22 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)
 
-        first = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
-        second = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        first = await execute_signal(
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(),
+            signal,
+        )
+        second = await execute_signal(
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(),
+            signal,
+        )
 
         assert first.order_id == second.order_id
 
@@ -172,7 +206,14 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id)  # qty=5, reference_price=150 -> cost 750
 
-        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(),
+            signal,
+        )
 
         assert not outcome.gate_allowed
         assert outcome.gate_reason is not None
@@ -188,7 +229,14 @@ class TestExecuteSignal:
         broker = PaperBroker(fake_clock)
         signal = _setup_signal(account.id, reference_price=None)
 
-        outcome = await execute_signal(db_session, fake_clock, broker, RiskConfig(), signal)
+        outcome = await execute_signal(
+            db_session,
+            fake_clock,
+            lambda _account: broker,
+            lambda _account, _broker: Allowed(),
+            RiskConfig(),
+            signal,
+        )
 
         assert not outcome.gate_allowed
         assert outcome.gate_reason == "missing_reference_price"

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from snapd_invest.broker import PaperBroker
 from snapd_invest.config import Settings
 from snapd_invest.llm import FakeLlmProvider
+from snapd_invest.promotion import Allowed
 from snapd_invest.risk import RiskConfig
 from snapd_invest.scheduler import JobConfig, build_default_jobs, build_scheduler
 
@@ -31,10 +32,12 @@ class TestBuildDefaultJobs:
             agent_interval_minutes=10,
             recommendation_expire_interval_minutes=7,
         )
+        broker = PaperBroker(fake_clock)
         jobs = build_default_jobs(
             session_factory=factory,
             clock=fake_clock,
-            broker=PaperBroker(fake_clock),
+            broker_factory=lambda _account: broker,
+            promotion_gate=lambda _account, _broker: Allowed(),
             llm=FakeLlmProvider(),
             risk_config=RiskConfig(),
             settings=settings,
@@ -48,10 +51,12 @@ class TestBuildDefaultJobs:
 
     def test_job_ids_are_unique(self, db_engine: AsyncEngine, fake_clock: FakeClock) -> None:
         factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        broker = PaperBroker(fake_clock)
         jobs = build_default_jobs(
             session_factory=factory,
             clock=fake_clock,
-            broker=PaperBroker(fake_clock),
+            broker_factory=lambda _account: broker,
+            promotion_gate=lambda _account, _broker: Allowed(),
             llm=FakeLlmProvider(),
             risk_config=RiskConfig(),
             settings=Settings(_env_file=None),  # type: ignore[call-arg]
@@ -71,10 +76,12 @@ class TestHandlerErrorIsolation:
             _env_file=None,  # type: ignore[call-arg]
             watchlist=["INVALID-NO-AT-SIGN"],
         )
+        broker = PaperBroker(fake_clock)
         jobs = build_default_jobs(
             session_factory=factory,
             clock=fake_clock,
-            broker=PaperBroker(fake_clock),
+            broker_factory=lambda _account: broker,
+            promotion_gate=lambda _account, _broker: Allowed(),
             llm=FakeLlmProvider(),
             risk_config=RiskConfig(),
             settings=settings,

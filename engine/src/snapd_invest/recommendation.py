@@ -32,8 +32,9 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from snapd_invest.broker import IBroker
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import Clock
+    from snapd_invest.promotion import PromotionGate
     from snapd_invest.risk import RiskConfig
 
 DEFAULT_TTL_HOURS = 24
@@ -223,7 +224,8 @@ def _apply_modifications(
 async def approve_and_execute(
     session: AsyncSession,
     clock: Clock,
-    broker: IBroker,
+    broker_factory: BrokerFactory,
+    promotion_gate: PromotionGate,
     risk_config: RiskConfig,
     *,
     recommendation: Recommendation,
@@ -260,7 +262,9 @@ async def approve_and_execute(
         },
     )
 
-    outcomes = await execute_signals(session, clock, broker, risk_config, effective_signals)
+    outcomes = await execute_signals(
+        session, clock, broker_factory, promotion_gate, risk_config, effective_signals
+    )
     recommendation.status = "executed"
     await session.flush()
 
