@@ -451,6 +451,7 @@ class TestSaxoBrokerGetOpenOrders:
 
 PROBE_PATH = "/trade/v2/orders"
 PROBE_URL = f"{SAXO_SIM_API_BASE}{PROBE_PATH}"
+ORDER_DELETE_URL_RE = rf"{SAXO_SIM_API_BASE}/trade/v2/orders/.+\?AccountKey=.+"
 
 
 class TestAuthedRequestRefreshAcrossVerbs:
@@ -540,3 +541,57 @@ class TestAuthedRequestRefreshAcrossVerbs:
         stored = await load_tokens(db_session, cipher, account_id=account_id, broker="saxo")
         assert stored is not None
         assert stored.access_token == "refreshed"
+
+
+class TestSaxoBrokerCancelOrder:
+    @respx.mock
+    async def test_cancel_order_happy_path_returns_none(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        route = respx.delete(url__regex=ORDER_DELETE_URL_RE).mock(
+            return_value=httpx.Response(200, json={"OrderId": "5038292933"}),
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            result = await broker.cancel_order(db_session, order_id="5038292933")
+
+        assert result is None
+        assert route.called
+        # AccountKey carried through the URL
+        assert "AccountKey=acc-key-1" in str(route.calls.last.request.url)
+        assert "/trade/v2/orders/5038292933" in str(route.calls.last.request.url)
+
+    @respx.mock
+    async def test_cancel_order_404_raises_http_error(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        respx.delete(url__regex=ORDER_DELETE_URL_RE).mock(
+            return_value=httpx.Response(404, text="not found"),
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            with pytest.raises(BrokerHttpError) as exc_info:
+                await broker.cancel_order(db_session, order_id="missing")
+        assert exc_info.value.status_code == 404

@@ -136,6 +136,18 @@ class SaxoBroker:
         """T-001-B will implement order placement against Saxo SIM."""
         raise NotImplementedError("SaxoBroker.place_order arrives in T-001-B (paper-only at MVP)")
 
+    async def cancel_order(self, session: AsyncSession, *, order_id: str) -> None:
+        """Cancel an open order via `DELETE /trade/v2/orders/{order_id}`.
+
+        Returns None on success; raises `BrokerHttpError` on 4xx/5xx
+        (e.g. 404 when the order has already filled or was cancelled).
+        """
+        account_key = await self._account_key(session)
+        await self._authed_delete(
+            session,
+            f"/trade/v2/orders/{order_id}?AccountKey={account_key}",
+        )
+
     async def get_open_orders(self, session: AsyncSession) -> list[SaxoOpenOrder]:
         """List the currently open orders across all accounts under this user.
 
