@@ -212,7 +212,20 @@ class SaxoBroker:
             )
         return account.saxo_account_key
 
-    async def _authed_get(self, session: AsyncSession, path: str) -> dict[str, Any]:
+    async def _authed_request(
+        self,
+        session: AsyncSession,
+        method: str,
+        path: str,
+        *,
+        json: Any = None,
+    ) -> dict[str, Any]:
+        """Authenticated Saxo request with reactive-refresh-on-401.
+
+        Generic over verb so GET / POST / DELETE share the same retry
+        logic. Returns the parsed JSON body, or `{}` for empty responses
+        (204 No Content / empty body on 200).
+        """
         token = await get_active_access_token(
             session,
             self._clock,
@@ -223,9 +236,11 @@ class SaxoBroker:
             broker="saxo",
         )
         try:
-            response = await self._client.get(
+            response = await self._client.request(
+                method,
                 f"{SAXO_SIM_API_BASE}{path}",
                 headers={"Authorization": f"Bearer {token}"},
+                json=json,
             )
         except httpx.TimeoutException as exc:
             raise BrokerTimeoutError(str(exc)) from exc
@@ -250,9 +265,11 @@ class SaxoBroker:
                 broker="saxo",
                 tokens=fresh,
             )
-            response = await self._client.get(
+            response = await self._client.request(
+                method,
                 f"{SAXO_SIM_API_BASE}{path}",
                 headers={"Authorization": f"Bearer {fresh.access_token}"},
+                json=json,
             )
             if response.status_code == HTTP_UNAUTHORIZED:
                 raise BrokerAuthError("401 persisted after refresh")
@@ -260,5 +277,16 @@ class SaxoBroker:
         if response.status_code >= HTTP_BAD_REQUEST:
             raise BrokerHttpError(status_code=response.status_code, body=response.text)
 
+        if not response.content:
+            return {}
         result: dict[str, Any] = response.json()
         return result
+
+    async def _authed_get(self, session: AsyncSession, path: str) -> dict[str, Any]:
+        return await self._authed_request(session, "GET", path)
+
+    async def _authed_post(self, session: AsyncSession, path: str, *, json: Any) -> dict[str, Any]:
+        return await self._authed_request(session, "POST", path, json=json)
+
+    async def _authed_delete(self, session: AsyncSession, path: str) -> dict[str, Any]:
+        return await self._authed_request(session, "DELETE", path)

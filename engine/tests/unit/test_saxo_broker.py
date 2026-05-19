@@ -447,3 +447,96 @@ class TestSaxoBrokerGetOpenOrders:
             orders = await broker.get_open_orders(db_session)
 
         assert orders == []
+
+
+PROBE_PATH = "/trade/v2/orders"
+PROBE_URL = f"{SAXO_SIM_API_BASE}{PROBE_PATH}"
+
+
+class TestAuthedRequestRefreshAcrossVerbs:
+    """The 401-then-refresh path on POST + DELETE — the GET version is
+    already covered by TestSaxoBrokerGetAccount.test_reactive_refresh_*.
+    """
+
+    @respx.mock
+    async def test_post_401_triggers_refresh_then_succeeds(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+
+        respx.post(PROBE_URL).mock(
+            side_effect=[
+                httpx.Response(401, json={"error": "expired"}),
+                httpx.Response(200, json={"OrderId": "5038"}),
+            ]
+        )
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "refreshed",
+                    "refresh_token": "r2",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 86400,
+                    "token_type": "Bearer",
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            payload = await broker._authed_post(db_session, PROBE_PATH, json={"x": 1})
+
+        assert payload == {"OrderId": "5038"}
+        stored = await load_tokens(db_session, cipher, account_id=account_id, broker="saxo")
+        assert stored is not None
+        assert stored.access_token == "refreshed"
+
+    @respx.mock
+    async def test_delete_401_triggers_refresh_then_succeeds(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+
+        respx.delete(PROBE_URL).mock(
+            side_effect=[
+                httpx.Response(401, json={"error": "expired"}),
+                httpx.Response(204),
+            ]
+        )
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "refreshed",
+                    "refresh_token": "r2",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 86400,
+                    "token_type": "Bearer",
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            payload = await broker._authed_delete(db_session, PROBE_PATH)
+
+        # 204 No Content → caller gets {}; refresh did happen.
+        assert payload == {}
+        stored = await load_tokens(db_session, cipher, account_id=account_id, broker="saxo")
+        assert stored is not None
+        assert stored.access_token == "refreshed"
