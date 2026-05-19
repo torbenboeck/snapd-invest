@@ -12,7 +12,12 @@ import respx
 from cryptography.fernet import Fernet
 
 from snapd_invest.broker import BrokerAuthError, BrokerHttpError
-from snapd_invest.broker.saxo import SAXO_SIM_API_BASE, SaxoBroker, SaxoInstrumentHit
+from snapd_invest.broker.saxo import (
+    SAXO_SIM_API_BASE,
+    SaxoBroker,
+    SaxoInstrumentHit,
+    SaxoOpenOrder,
+)
 from snapd_invest.broker.saxo_oauth import (
     SIM_TOKEN_URL,
     TokenSet,
@@ -355,3 +360,90 @@ class TestSaxoBrokerGetLastPrice:
         account = await db_session.get(Account, account_id)
         assert account is not None
         assert account.saxo_account_key == "acc-key-1"
+
+
+OPEN_ORDERS_URL = f"{SAXO_SIM_API_BASE}/port/v1/orders/me"
+
+
+class TestSaxoBrokerGetOpenOrders:
+    @respx.mock
+    async def test_parses_two_open_orders(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+        respx.get(OPEN_ORDERS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "OrderId": "5038292933",
+                            "Uic": 16,
+                            "AssetType": "FxSpot",
+                            "BuySell": "Buy",
+                            "Amount": 100000,
+                            "OpenOrderType": "Limit",
+                            "Duration": {"DurationType": "GoodTillCancel"},
+                            "ExternalReference": "idemp-1",
+                            "DisplayAndFormat": {"Symbol": "EURDKK", "Currency": "DKK"},
+                        },
+                        {
+                            "OrderId": "5038292934",
+                            "Uic": 21,
+                            "AssetType": "FxSpot",
+                            "BuySell": "Sell",
+                            "Amount": 25000,
+                            "OpenOrderType": "Market",
+                            "Duration": {"DurationType": "DayOrder"},
+                            "ExternalReference": None,
+                            "DisplayAndFormat": {"Symbol": "EURUSD", "Currency": "USD"},
+                        },
+                    ],
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            orders = await broker.get_open_orders(db_session)
+
+        assert len(orders) == 2
+        assert isinstance(orders[0], SaxoOpenOrder)
+        assert orders[0].order_id == "5038292933"
+        assert orders[0].uic == 16
+        assert orders[0].symbol == "EURDKK"
+        assert orders[0].asset_type == "FxSpot"
+        assert orders[0].buy_sell == "Buy"
+        assert orders[0].amount == Decimal("100000")
+        assert orders[0].order_type == "Limit"
+        assert orders[0].duration_type == "GoodTillCancel"
+        assert orders[0].external_reference == "idemp-1"
+        assert orders[1].duration_type == "DayOrder"
+        assert orders[1].external_reference is None
+
+    @respx.mock
+    async def test_returns_empty_list_when_no_orders(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+        respx.get(OPEN_ORDERS_URL).mock(return_value=httpx.Response(200, json={"Data": []}))
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            orders = await broker.get_open_orders(db_session)
+
+        assert orders == []

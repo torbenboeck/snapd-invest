@@ -67,6 +67,21 @@ class SaxoInstrumentHit:
     description: str
 
 
+@dataclass(slots=True, frozen=True)
+class SaxoOpenOrder:
+    """One open order from `/port/v1/orders/me`."""
+
+    order_id: str
+    uic: int
+    symbol: str
+    asset_type: str
+    buy_sell: str
+    amount: Decimal
+    order_type: str
+    duration_type: str
+    external_reference: str | None
+
+
 class SaxoBroker:
     """SaxoBroker — IBroker against Saxo SIM. T-001-A: get_account only."""
 
@@ -120,6 +135,33 @@ class SaxoBroker:
     async def place_order(self, session: AsyncSession, request: OrderRequest) -> OrderResult:
         """T-001-B will implement order placement against Saxo SIM."""
         raise NotImplementedError("SaxoBroker.place_order arrives in T-001-B (paper-only at MVP)")
+
+    async def get_open_orders(self, session: AsyncSession) -> list[SaxoOpenOrder]:
+        """List the currently open orders across all accounts under this user.
+
+        Saxo's `/port/v1/orders/me` returns every working order for the
+        authenticated user regardless of `AccountKey`. Filtering down to a
+        specific account is a caller concern; the broker just maps the wire
+        shape into typed rows.
+        """
+        payload = await self._authed_get(
+            session,
+            "/port/v1/orders/me?FieldGroups=DisplayAndFormat,ExchangeInfo",
+        )
+        return [
+            SaxoOpenOrder(
+                order_id=str(row["OrderId"]),
+                uic=int(row["Uic"]),
+                symbol=row.get("DisplayAndFormat", {}).get("Symbol", ""),
+                asset_type=row["AssetType"],
+                buy_sell=row["BuySell"],
+                amount=Decimal(str(row["Amount"])),
+                order_type=row["OpenOrderType"],
+                duration_type=row.get("Duration", {}).get("DurationType", ""),
+                external_reference=row.get("ExternalReference"),
+            )
+            for row in payload.get("Data", [])
+        ]
 
     async def get_last_price(
         self, session: AsyncSession, *, instrument: Instrument
