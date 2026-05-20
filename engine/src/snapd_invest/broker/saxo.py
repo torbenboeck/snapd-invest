@@ -146,6 +146,21 @@ class SaxoOpenOrder:
     external_reference: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class SaxoPosition:
+    """One open position from `/port/v1/positions`.
+
+    `amount` is signed: positive means long, negative means short.
+    """
+
+    uic: int
+    symbol: str
+    asset_type: str
+    amount: Decimal
+    open_price: Decimal
+    currency: str
+
+
 class SaxoBroker:
     """SaxoBroker — IBroker against Saxo SIM. T-001-A: get_account only."""
 
@@ -309,6 +324,36 @@ class SaxoBroker:
             session,
             f"/trade/v2/orders/{order_id}?AccountKey={account_key}",
         )
+
+    async def get_positions(self, session: AsyncSession, *, account: Account) -> list[SaxoPosition]:
+        """List currently-open positions for the broker's account.
+
+        Saxo's `/port/v1/positions` is scoped by ClientKey; we filter
+        client-side to the account's ClientKey via the query param. Caller
+        must have completed identity backfill so `account.saxo_client_key`
+        is set, otherwise raises `BrokerAuthError`.
+        """
+        if account.saxo_client_key is None:
+            raise BrokerAuthError(
+                f"account {account.id} has no saxo_client_key; "
+                "re-authenticate via 'snapdinvest auth saxo --account ...'"
+            )
+        payload = await self._authed_get(
+            session,
+            f"/port/v1/positions?ClientKey={account.saxo_client_key}"
+            f"&FieldGroups=DisplayAndFormat,PositionBase",
+        )
+        return [
+            SaxoPosition(
+                uic=int(row["PositionBase"]["Uic"]),
+                symbol=row.get("DisplayAndFormat", {}).get("Symbol", ""),
+                asset_type=row["PositionBase"]["AssetType"],
+                amount=Decimal(str(row["PositionBase"]["Amount"])),
+                open_price=Decimal(str(row["PositionBase"]["OpenPrice"])),
+                currency=row.get("DisplayAndFormat", {}).get("Currency", ""),
+            )
+            for row in payload.get("Data", [])
+        ]
 
     async def get_open_orders(self, session: AsyncSession) -> list[SaxoOpenOrder]:
         """List the currently open orders across all accounts under this user.

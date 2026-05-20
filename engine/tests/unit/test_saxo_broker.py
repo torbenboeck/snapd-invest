@@ -26,6 +26,7 @@ from snapd_invest.broker.saxo import (
     SaxoBroker,
     SaxoInstrumentHit,
     SaxoOpenOrder,
+    SaxoPosition,
 )
 from snapd_invest.broker.saxo_oauth import (
     SIM_TOKEN_URL,
@@ -954,3 +955,119 @@ class TestSaxoBrokerPlaceOrderIdempotentReplay:
         # Pending row should be flipped to terminal after reconciliation.
         await db_session.refresh(existing)
         assert existing.status == "filled"
+
+
+POSITIONS_URL = f"{SAXO_SIM_API_BASE}/port/v1/positions"
+
+
+class TestSaxoBrokerGetPositions:
+    @respx.mock
+    async def test_parses_two_positions(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        account = await db_session.get(Account, account_id)
+        assert account is not None
+        account.saxo_client_key = "client-key-abc"
+        await db_session.flush()
+
+        respx.get(POSITIONS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "PositionId": "p-1",
+                            "PositionBase": {
+                                "Uic": 16,
+                                "AssetType": "FxSpot",
+                                "Amount": 100000,
+                                "OpenPrice": 7.47385,
+                            },
+                            "DisplayAndFormat": {"Symbol": "EURDKK", "Currency": "DKK"},
+                        },
+                        {
+                            "PositionId": "p-2",
+                            "PositionBase": {
+                                "Uic": 21,
+                                "AssetType": "FxSpot",
+                                "Amount": -25000,
+                                "OpenPrice": 1.08,
+                            },
+                            "DisplayAndFormat": {"Symbol": "EURUSD", "Currency": "USD"},
+                        },
+                    ],
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            positions = await broker.get_positions(db_session, account=account)
+
+        assert len(positions) == 2
+        assert isinstance(positions[0], SaxoPosition)
+        assert positions[0].uic == 16
+        assert positions[0].symbol == "EURDKK"
+        assert positions[0].asset_type == "FxSpot"
+        assert positions[0].amount == Decimal("100000")
+        assert positions[0].open_price == Decimal("7.47385")
+        assert positions[0].currency == "DKK"
+        assert positions[1].amount == Decimal("-25000")
+
+    @respx.mock
+    async def test_returns_empty_when_no_positions(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        account = await db_session.get(Account, account_id)
+        assert account is not None
+        account.saxo_client_key = "client-key-abc"
+        await db_session.flush()
+
+        respx.get(POSITIONS_URL).mock(return_value=httpx.Response(200, json={"Data": []}))
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            positions = await broker.get_positions(db_session, account=account)
+
+        assert positions == []
+
+    async def test_missing_saxo_client_key_raises_auth_error(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        account = await db_session.get(Account, account_id)
+        assert account is not None
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            with pytest.raises(BrokerAuthError, match="saxo_client_key"):
+                await broker.get_positions(db_session, account=account)

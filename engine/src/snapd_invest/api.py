@@ -420,6 +420,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
     async def get_portfolio(
         session: Annotated[AsyncSession, Depends(session_dep)],
         clock: Annotated[Clock, Depends(clock_dep)],
+        broker_factory: Annotated[BrokerFactory, Depends(broker_factory_dep)],
         account_name: str = "paper",
     ) -> PortfolioDto:
         account = await get_account_by_name(session, account_name)
@@ -427,7 +428,26 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
             account = await create_account(
                 session, clock, name=account_name, initial_cash=Decimal("100000")
             )
-        summary = await build_summary(session, account)
+        saxo_broker: SaxoBroker | None = None
+        if account.account_type == "sim":
+            broker = broker_factory(account)
+            if isinstance(broker, SaxoBroker):
+                saxo_broker = broker
+        try:
+            summary = await build_summary(session, account, broker=saxo_broker, clock=clock)
+        except BrokerAuthError as exc:
+            log.info("saxo_reauth_required", account_id=account.id, reason=str(exc))
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "saxo_reauth_required",
+                    "message": (
+                        "Saxo session expired or never authenticated; "
+                        "run 'snapdinvest auth saxo --account <id>'"
+                    ),
+                    "account_id": account.id,
+                },
+            ) from exc
         return PortfolioDto(
             account_id=summary.account_id,
             account_name=summary.account_name,
