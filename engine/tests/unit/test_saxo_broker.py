@@ -17,6 +17,7 @@ from snapd_invest.broker import (
     BrokerAuthError,
     BrokerHttpError,
     Filled,
+    IdempotentReplay,
     OrderRequest,
     Rejected,
 )
@@ -33,7 +34,7 @@ from snapd_invest.broker.saxo_oauth import (
     store_tokens,
 )
 from snapd_invest.crypto import FernetCipher
-from snapd_invest.models import Account, Instrument, Order
+from snapd_invest.models import Account, Instrument, Order, new_id
 from snapd_invest.portfolio import create_account
 
 if TYPE_CHECKING:
@@ -818,3 +819,138 @@ class TestSaxoBrokerPlaceOrder:
                         idempotency_key="idemp-no-uic",
                     ),
                 )
+
+
+class TestSaxoBrokerPlaceOrderIdempotentReplay:
+    @respx.mock
+    async def test_replay_with_terminal_filled_order_returns_replay_without_saxo_call(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        _, account = await _seed_account_with_key(db_session, fake_clock, cipher)
+        instrument = await _seed_instrument(db_session)
+
+        # Seed a pre-existing terminal Order row with the same key.
+        existing = Order(
+            id=new_id(),
+            account_id=account.id,
+            instrument_id=instrument.id,
+            side="buy",
+            quantity=Decimal("100000"),
+            limit_price=None,
+            status="filled",
+            idempotency_key="replay-key-1",
+            source="microtrader",
+            submitted_at=fake_clock.now(),
+        )
+        db_session.add(existing)
+        await db_session.flush()
+
+        # respx with no mocked POST = any POST raises. So if the broker
+        # respects idempotency it won't call Saxo at all.
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account.id,
+            )
+            result = await broker.place_order(
+                db_session,
+                OrderRequest(
+                    account=account,
+                    instrument=instrument,
+                    side="buy",
+                    quantity=Decimal("100000"),
+                    limit_price=None,
+                    source="microtrader",
+                    idempotency_key="replay-key-1",
+                ),
+            )
+
+        assert isinstance(result, IdempotentReplay)
+        assert result.original_idempotency_key == "replay-key-1"
+        assert result.order.id == existing.id
+        # Ensure no second Order row was created.
+        rows = (
+            (await db_session.execute(select(Order).where(Order.idempotency_key == "replay-key-1")))
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+
+    @respx.mock
+    async def test_replay_with_pending_order_reconciles_via_saxo(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """When our row is non-terminal, query Saxo's /orders/me to find the
+        external order and flip our row to terminal. Returns IdempotentReplay
+        either way — caller should not re-POST.
+        """
+        cipher = FernetCipher(Fernet.generate_key())
+        _, account = await _seed_account_with_key(db_session, fake_clock, cipher)
+        instrument = await _seed_instrument(db_session)
+
+        existing = Order(
+            id=new_id(),
+            account_id=account.id,
+            instrument_id=instrument.id,
+            side="buy",
+            quantity=Decimal("100000"),
+            limit_price=None,
+            status="pending",
+            idempotency_key="replay-key-pending",
+            source="microtrader",
+            submitted_at=fake_clock.now(),
+        )
+        db_session.add(existing)
+        await db_session.flush()
+
+        respx.get(OPEN_ORDERS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "OrderId": "5038292999",
+                            "Uic": 16,
+                            "AssetType": "FxSpot",
+                            "BuySell": "Buy",
+                            "Amount": 100000,
+                            "OpenOrderType": "Market",
+                            "Duration": {"DurationType": "DayOrder"},
+                            "ExternalReference": "replay-key-pending",
+                            "DisplayAndFormat": {"Symbol": "EURDKK"},
+                        }
+                    ],
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account.id,
+            )
+            result = await broker.place_order(
+                db_session,
+                OrderRequest(
+                    account=account,
+                    instrument=instrument,
+                    side="buy",
+                    quantity=Decimal("100000"),
+                    limit_price=None,
+                    source="microtrader",
+                    idempotency_key="replay-key-pending",
+                ),
+            )
+
+        assert isinstance(result, IdempotentReplay)
+        assert result.original_idempotency_key == "replay-key-pending"
+        # Pending row should be flipped to terminal after reconciliation.
+        await db_session.refresh(existing)
+        assert existing.status == "filled"

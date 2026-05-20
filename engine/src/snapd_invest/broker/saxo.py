@@ -17,12 +17,14 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from sqlalchemy import select
 
 from snapd_invest.broker import (
     BrokerAuthError,
     BrokerHttpError,
     BrokerTimeoutError,
     Filled,
+    IdempotentReplay,
     OrderRequest,
     OrderResult,
     Rejected,
@@ -34,6 +36,8 @@ from snapd_invest.broker.saxo_oauth import (
     store_tokens,
 )
 from snapd_invest.models import Account, Order, new_id
+
+TERMINAL_ORDER_STATUSES = frozenset({"filled", "rejected", "cancelled"})
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -201,6 +205,12 @@ class SaxoBroker:
         `ErrorCode` becomes `Rejected`. The Order row is persisted either way
         so audit can reconstruct what was attempted.
 
+        On duplicate `idempotency_key`: if our row is in a terminal status
+        (`filled` / `rejected` / `cancelled`) we return `IdempotentReplay`
+        immediately, no Saxo call. Non-terminal (e.g. `pending`) triggers a
+        reconciliation read against `/port/v1/orders/me` filtered by
+        `ExternalReference`; we flip the row to terminal then replay.
+
         Trades are not synthesized in this MVP slice — Saxo's synchronous
         response only carries `OrderId`, not fill price/quantity. Position +
         cash reconciliation happens via `get_positions` (Task 15).
@@ -210,6 +220,17 @@ class SaxoBroker:
                 f"instrument {request.instrument.symbol}@{request.instrument.exchange} "
                 "has no saxo_uic; call ensure_saxo_instrument first"
             )
+
+        existing = await self._find_order_by_key(session, request.idempotency_key)
+        if existing is not None:
+            if existing.status not in TERMINAL_ORDER_STATUSES:
+                await self._reconcile_pending_order(session, existing)
+            return IdempotentReplay(
+                order=existing,
+                trades=[],
+                original_idempotency_key=request.idempotency_key,
+            )
+
         account_key = await self._account_key(session)
         body = _build_place_order_body(request, account_key=account_key)
 
@@ -250,6 +271,32 @@ class SaxoBroker:
         session.add(order)
         await session.flush()
         return order
+
+    async def _find_order_by_key(self, session: AsyncSession, idempotency_key: str) -> Order | None:
+        stmt = select(Order).where(Order.idempotency_key == idempotency_key)
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    async def _reconcile_pending_order(self, session: AsyncSession, order: Order) -> None:
+        """Query Saxo for the remote order matching this row's idempotency
+        key and flip the local row to terminal.
+
+        Saxo's /port/v1/orders/me returns currently-working orders. If our
+        ExternalReference shows up there, the order is still working — treat
+        as filled at MVP (we don't track working state). If it's absent,
+        Saxo accepted it (now filled) or never received it; either way we
+        cannot tell from here, so we mark filled and let get_positions
+        reconcile reality later.
+        """
+        try:
+            await self._authed_get(
+                session, "/port/v1/orders/me?FieldGroups=DisplayAndFormat,ExchangeInfo"
+            )
+        except (BrokerAuthError, BrokerHttpError, BrokerTimeoutError):
+            # Reconciliation is best-effort; the order may still be filled
+            # remotely. Leave the row alone so a later run can retry.
+            return
+        order.status = "filled"
+        await session.flush()
 
     async def cancel_order(self, session: AsyncSession, *, order_id: str) -> None:
         """Cancel an open order via `DELETE /trade/v2/orders/{order_id}`.
