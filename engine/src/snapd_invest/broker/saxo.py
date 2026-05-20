@@ -11,6 +11,7 @@ on every call; this keeps the broker stateless and concurrency-safe.
 
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -21,8 +22,10 @@ from snapd_invest.broker import (
     BrokerAuthError,
     BrokerHttpError,
     BrokerTimeoutError,
+    Filled,
     OrderRequest,
     OrderResult,
+    Rejected,
 )
 from snapd_invest.broker.saxo_oauth import (
     get_active_access_token,
@@ -30,7 +33,7 @@ from snapd_invest.broker.saxo_oauth import (
     refresh_tokens,
     store_tokens,
 )
-from snapd_invest.models import Account
+from snapd_invest.models import Account, Order, new_id
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,6 +68,63 @@ class SaxoInstrumentHit:
     symbol: str
     asset_type: str
     description: str
+
+
+def _build_place_order_body(request: OrderRequest, *, account_key: str) -> dict[str, Any]:
+    """Map an `OrderRequest` to Saxo's `POST /trade/v2/orders` body shape.
+
+    `Amount` and `OrderPrice` are emitted as JSON numbers (float) because
+    httpx's encoder rejects `Decimal`. Saxo accepts numeric input as either
+    int or float.
+    """
+    assert request.instrument.saxo_uic is not None
+    body: dict[str, Any] = {
+        "Uic": request.instrument.saxo_uic,
+        "BuySell": "Buy" if request.side == "buy" else "Sell",
+        "AssetType": request.instrument.saxo_asset_type,
+        "Amount": float(request.quantity),
+        "OrderRelation": "StandAlone",
+        "AccountKey": account_key,
+        "ExternalReference": request.idempotency_key,
+        "ManualOrder": request.source.startswith("manual"),
+    }
+    if request.limit_price is None:
+        body["OrderType"] = "Market"
+        body["OrderDuration"] = {"DurationType": "DayOrder"}
+    else:
+        body["OrderType"] = "Limit"
+        body["OrderPrice"] = float(request.limit_price)
+        body["OrderDuration"] = {"DurationType": "GoodTillCancel"}
+    return body
+
+
+def _parse_saxo_error(body: Any) -> tuple[str | None, str | None]:
+    """Extract (ErrorCode, Message) from a Saxo error response.
+
+    Saxo's trading endpoints surface errors in either:
+        {"ErrorCode": "...", "Message": "..."}
+        {"ErrorInfo": {"ErrorCode": "...", "Message": "..."}}
+
+    `body` may be a parsed dict (from json()) or a raw string (from
+    `BrokerHttpError.body`). Returns `(None, None)` if the shape doesn't
+    match a recognised error.
+    """
+    payload: Any
+    if isinstance(body, str):
+        try:
+            payload = _json.loads(body)
+        except _json.JSONDecodeError:
+            return (None, None)
+    else:
+        payload = body
+    if not isinstance(payload, dict):
+        return (None, None)
+    if "ErrorCode" in payload:
+        return (str(payload["ErrorCode"]), payload.get("Message"))
+    info = payload.get("ErrorInfo")
+    if isinstance(info, dict) and "ErrorCode" in info:
+        return (str(info["ErrorCode"]), info.get("Message"))
+    return (None, None)
 
 
 @dataclass(slots=True, frozen=True)
@@ -133,8 +193,63 @@ class SaxoBroker:
         ]
 
     async def place_order(self, session: AsyncSession, request: OrderRequest) -> OrderResult:
-        """T-001-B will implement order placement against Saxo SIM."""
-        raise NotImplementedError("SaxoBroker.place_order arrives in T-001-B (paper-only at MVP)")
+        """Place an order against `POST /trade/v2/orders`.
+
+        Wire-shape per `docs/integrations/saxo-openapi-notes.md`. The engine's
+        idempotency_key plumbs through to Saxo's `ExternalReference`. A 200
+        response with `OrderId` becomes `Filled`; a 4xx with a Saxo
+        `ErrorCode` becomes `Rejected`. The Order row is persisted either way
+        so audit can reconstruct what was attempted.
+
+        Trades are not synthesized in this MVP slice — Saxo's synchronous
+        response only carries `OrderId`, not fill price/quantity. Position +
+        cash reconciliation happens via `get_positions` (Task 15).
+        """
+        if request.instrument.saxo_uic is None:
+            raise ValueError(
+                f"instrument {request.instrument.symbol}@{request.instrument.exchange} "
+                "has no saxo_uic; call ensure_saxo_instrument first"
+            )
+        account_key = await self._account_key(session)
+        body = _build_place_order_body(request, account_key=account_key)
+
+        try:
+            response = await self._authed_post(session, "/trade/v2/orders", json=body)
+        except BrokerHttpError as exc:
+            error_code, message = _parse_saxo_error(exc.body)
+            if error_code is not None:
+                await self._persist_order(session, request, status="rejected")
+                return Rejected(reason=message or "rejected", saxo_error_code=error_code)
+            raise
+
+        # 2xx but body still carries an ErrorCode (rare; defensive).
+        error_code, message = _parse_saxo_error(response)
+        if error_code is not None:
+            await self._persist_order(session, request, status="rejected")
+            return Rejected(reason=message or "rejected", saxo_error_code=error_code)
+
+        order = await self._persist_order(session, request, status="filled")
+        return Filled(order=order, trades=[])
+
+    async def _persist_order(
+        self, session: AsyncSession, request: OrderRequest, *, status: str
+    ) -> Order:
+        order = Order(
+            id=new_id(),
+            account_id=request.account.id,
+            instrument_id=request.instrument.id,
+            side=request.side,
+            quantity=request.quantity,
+            limit_price=request.limit_price,
+            status=status,
+            idempotency_key=request.idempotency_key,
+            source=request.source,
+            correlation_id=request.correlation_id,
+            submitted_at=self._clock.now(),
+        )
+        session.add(order)
+        await session.flush()
+        return order
 
     async def cancel_order(self, session: AsyncSession, *, order_id: str) -> None:
         """Cancel an open order via `DELETE /trade/v2/orders/{order_id}`.

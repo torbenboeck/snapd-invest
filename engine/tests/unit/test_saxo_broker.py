@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -10,8 +11,15 @@ import httpx
 import pytest
 import respx
 from cryptography.fernet import Fernet
+from sqlalchemy import select
 
-from snapd_invest.broker import BrokerAuthError, BrokerHttpError
+from snapd_invest.broker import (
+    BrokerAuthError,
+    BrokerHttpError,
+    Filled,
+    OrderRequest,
+    Rejected,
+)
 from snapd_invest.broker.saxo import (
     SAXO_SIM_API_BASE,
     SaxoBroker,
@@ -25,7 +33,7 @@ from snapd_invest.broker.saxo_oauth import (
     store_tokens,
 )
 from snapd_invest.crypto import FernetCipher
-from snapd_invest.models import Account, Instrument
+from snapd_invest.models import Account, Instrument, Order
 from snapd_invest.portfolio import create_account
 
 if TYPE_CHECKING:
@@ -595,3 +603,218 @@ class TestSaxoBrokerCancelOrder:
             with pytest.raises(BrokerHttpError) as exc_info:
                 await broker.cancel_order(db_session, order_id="missing")
         assert exc_info.value.status_code == 404
+
+
+PLACE_ORDER_URL = f"{SAXO_SIM_API_BASE}/trade/v2/orders"
+
+
+async def _seed_instrument(db_session: AsyncSession) -> Instrument:
+    inst = Instrument(
+        symbol="EURDKK",
+        exchange="FX",
+        instrument_type="fx",
+        currency="DKK",
+        tick_size=Decimal("0.00001"),
+        saxo_uic=16,
+        saxo_asset_type="FxSpot",
+        saxo_currency_decimals=4,
+    )
+    db_session.add(inst)
+    await db_session.flush()
+    return inst
+
+
+async def _seed_account_with_key(
+    db_session: AsyncSession,
+    fake_clock: FakeClock,
+    cipher: FernetCipher,
+    *,
+    saxo_account_key: str = "acc-key-1",
+) -> tuple[str, Account]:
+    account_id = await _seed_tokens(
+        db_session, fake_clock, cipher, saxo_account_key=saxo_account_key
+    )
+    account = await db_session.get(Account, account_id)
+    assert account is not None
+    return account_id, account
+
+
+class TestSaxoBrokerPlaceOrder:
+    @respx.mock
+    async def test_market_order_happy_path(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        _, account = await _seed_account_with_key(db_session, fake_clock, cipher)
+        instrument = await _seed_instrument(db_session)
+        await db_session.flush()
+
+        route = respx.post(PLACE_ORDER_URL).mock(
+            return_value=httpx.Response(200, json={"OrderId": "5038292933"}),
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account.id,
+            )
+            result = await broker.place_order(
+                db_session,
+                OrderRequest(
+                    account=account,
+                    instrument=instrument,
+                    side="buy",
+                    quantity=Decimal("100000"),
+                    limit_price=None,
+                    source="microtrader",
+                    idempotency_key="idemp-1",
+                ),
+            )
+
+        assert isinstance(result, Filled)
+        assert result.order.idempotency_key == "idemp-1"
+        assert result.order.side == "buy"
+        assert result.order.quantity == Decimal("100000")
+        assert result.order.limit_price is None
+        assert result.order.status == "filled"
+        # Body shape per docs/integrations/saxo-openapi-notes.md
+        sent_body = route.calls.last.request.read()
+        body = json.loads(sent_body)
+        assert body["Uic"] == 16
+        assert body["BuySell"] == "Buy"
+        assert body["AssetType"] == "FxSpot"
+        assert body["Amount"] == 100000
+        assert body["OrderType"] == "Market"
+        assert body["OrderRelation"] == "StandAlone"
+        assert body["AccountKey"] == "acc-key-1"
+        assert body["ExternalReference"] == "idemp-1"
+        assert body["ManualOrder"] is False
+
+    @respx.mock
+    async def test_limit_order_sets_order_price_and_duration(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        _, account = await _seed_account_with_key(db_session, fake_clock, cipher)
+        instrument = await _seed_instrument(db_session)
+        await db_session.flush()
+
+        route = respx.post(PLACE_ORDER_URL).mock(
+            return_value=httpx.Response(200, json={"OrderId": "5038292934"}),
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account.id,
+            )
+            result = await broker.place_order(
+                db_session,
+                OrderRequest(
+                    account=account,
+                    instrument=instrument,
+                    side="sell",
+                    quantity=Decimal("25000"),
+                    limit_price=Decimal("7.5"),
+                    source="manual-cli",
+                    idempotency_key="idemp-2",
+                ),
+            )
+
+        assert isinstance(result, Filled)
+        body = json.loads(route.calls.last.request.read())
+        assert body["OrderType"] == "Limit"
+        assert Decimal(str(body["OrderPrice"])) == Decimal("7.5")
+        assert body["OrderDuration"] == {"DurationType": "GoodTillCancel"}
+        assert body["BuySell"] == "Sell"
+        # manual source flips ManualOrder
+        assert body["ManualOrder"] is True
+
+    @respx.mock
+    async def test_saxo_returns_market_closed_returns_rejected(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        _, account = await _seed_account_with_key(db_session, fake_clock, cipher)
+        instrument = await _seed_instrument(db_session)
+        await db_session.flush()
+
+        respx.post(PLACE_ORDER_URL).mock(
+            return_value=httpx.Response(
+                400,
+                json={"ErrorCode": "MarketClosed", "Message": "Market is closed"},
+            ),
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account.id,
+            )
+            result = await broker.place_order(
+                db_session,
+                OrderRequest(
+                    account=account,
+                    instrument=instrument,
+                    side="buy",
+                    quantity=Decimal("100000"),
+                    limit_price=None,
+                    source="microtrader",
+                    idempotency_key="idemp-3",
+                ),
+            )
+
+        assert isinstance(result, Rejected)
+        assert result.saxo_error_code == "MarketClosed"
+        assert "closed" in result.reason.lower()
+        # Order row persisted with status=rejected so audit can reproduce.
+        order = (
+            await db_session.execute(select(Order).where(Order.idempotency_key == "idemp-3"))
+        ).scalar_one()
+        assert order.status == "rejected"
+
+    async def test_place_order_missing_saxo_uic_raises(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        _, account = await _seed_account_with_key(db_session, fake_clock, cipher)
+        bare_instrument = Instrument(
+            symbol="UNKNOWN",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+            tick_size=Decimal("0.01"),
+        )
+        db_session.add(bare_instrument)
+        await db_session.flush()
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account.id,
+            )
+            with pytest.raises(ValueError, match="saxo_uic"):
+                await broker.place_order(
+                    db_session,
+                    OrderRequest(
+                        account=account,
+                        instrument=bare_instrument,
+                        side="buy",
+                        quantity=Decimal("1"),
+                        limit_price=None,
+                        source="microtrader",
+                        idempotency_key="idemp-no-uic",
+                    ),
+                )
