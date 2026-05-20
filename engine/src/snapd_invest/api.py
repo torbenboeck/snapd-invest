@@ -46,10 +46,11 @@ from snapd_invest.broker.saxo_oauth import (
 from snapd_invest.clock import Clock, SystemClock
 from snapd_invest.config import Settings, get_settings
 from snapd_invest.crypto import FernetCipher
-from snapd_invest.data import ensure_instrument
+from snapd_invest.data import ensure_instrument, ensure_saxo_instrument
+from snapd_invest.execution import execute_signal
 from snapd_invest.llm import OllamaProvider
 from snapd_invest.logging_config import configure_logging, get_logger
-from snapd_invest.models import Account
+from snapd_invest.models import Account, Instrument
 from snapd_invest.persistence import make_engine, make_session_factory, session_scope
 from snapd_invest.pipeline import run_agent_once, run_microtrader_once
 from snapd_invest.portfolio import (
@@ -67,7 +68,7 @@ from snapd_invest.recommendation import (
 )
 from snapd_invest.risk import RiskConfig
 from snapd_invest.scheduler import build_default_jobs, build_scheduler
-from snapd_invest.strategy import SMACrossoverStrategy
+from snapd_invest.strategy import Signal, SMACrossoverStrategy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -365,6 +366,26 @@ class CreateAccountResponse(BaseModel):
     account_type: str
     base_currency: str
     saxo_account_id: str | None = None
+
+
+# -- Orders --
+
+
+class PlaceOrderRequest(BaseModel):
+    account_id: str
+    instrument_symbol: str
+    instrument_exchange: str
+    side: Literal["buy", "sell"]
+    quantity: Decimal
+    limit_price: Decimal | None = None
+    source: str = "manual-cli"
+
+
+class PlaceOrderResponse(BaseModel):
+    kind: str
+    order_id: str | None = None
+    reason: str | None = None
+    saxo_error_code: str | None = None
 
 
 _CALLBACK_HTML = """<!doctype html>
@@ -847,7 +868,145 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
             )
         return AccountInfoDto(account_id=account.id, account_type=account.account_type)
 
+    # -- Orders --
+
+    @app.post("/v1/orders", response_model=PlaceOrderResponse, tags=["orders"])
+    async def place_order_route(
+        payload: PlaceOrderRequest,
+        request: Request,
+        session: Annotated[AsyncSession, Depends(session_dep)],
+        clock: Annotated[Clock, Depends(clock_dep)],
+        broker_factory: Annotated[BrokerFactory, Depends(broker_factory_dep)],
+        promotion_gate: Annotated[PromotionGate, Depends(promotion_gate_dep)],
+        risk_config: Annotated[RiskConfig, Depends(risk_dep)],
+    ) -> PlaceOrderResponse:
+        account = (
+            await session.execute(select(Account).where(Account.id == payload.account_id))
+        ).scalar_one_or_none()
+        if account is None:
+            raise HTTPException(status_code=404, detail=f"account {payload.account_id} not found")
+
+        # Resolve the instrument. SIM accounts go through ensure_saxo_instrument
+        # to populate saxo_uic/asset_type from /ref/v1/instruments.
+        broker = broker_factory(account)
+        try:
+            if account.account_type == "sim" and isinstance(broker, SaxoBroker):
+                await ensure_saxo_instrument(
+                    session,
+                    broker,
+                    symbol=payload.instrument_symbol,
+                    exchange=payload.instrument_exchange,
+                )
+            else:
+                await ensure_instrument(
+                    session,
+                    symbol=payload.instrument_symbol,
+                    exchange=payload.instrument_exchange,
+                    instrument_type="fx" if payload.instrument_exchange == "FX" else "stock",
+                    currency=account.base_currency,
+                )
+        except BrokerAuthError as exc:
+            log.info("saxo_reauth_required", account_id=account.id, reason=str(exc))
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "saxo_reauth_required",
+                    "message": (
+                        "Saxo session expired or never authenticated; "
+                        "run 'snapdinvest auth saxo --account <id>'"
+                    ),
+                    "account_id": account.id,
+                },
+            ) from exc
+
+        # Risk gate requires a reference price for buy sizing. For limit
+        # orders we already have one; for market orders fetch the last price
+        # from the broker (Saxo bid/ask mid or PaperBroker's last bar).
+        reference_price = payload.limit_price
+        if reference_price is None and payload.side == "buy":
+            instrument_for_quote = (
+                await session.execute(
+                    select(Instrument).where(
+                        Instrument.symbol == payload.instrument_symbol,
+                        Instrument.exchange == payload.instrument_exchange,
+                    )
+                )
+            ).scalar_one()
+            try:
+                reference_price = await broker.get_last_price(
+                    session, instrument=instrument_for_quote
+                )
+            except BrokerAuthError as exc:
+                log.info("saxo_reauth_required", account_id=account.id, reason=str(exc))
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "saxo_reauth_required",
+                        "message": (
+                            "Saxo session expired or never authenticated; "
+                            "run 'snapdinvest auth saxo --account <id>'"
+                        ),
+                        "account_id": account.id,
+                    },
+                ) from exc
+
+        correlation_id = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())
+        signal = Signal(
+            source=payload.source,
+            account_id=account.id,
+            instrument_symbol=payload.instrument_symbol,
+            instrument_exchange=payload.instrument_exchange,
+            action=payload.side,
+            quantity=payload.quantity,
+            conviction=Decimal("1"),
+            rationale="Manual placement via POST /v1/orders",
+            emitted_at=clock.now(),
+            correlation_id=correlation_id,
+            reference_price=reference_price,
+            limit_price=payload.limit_price,
+        )
+        try:
+            outcome = await execute_signal(
+                session, clock, broker_factory, promotion_gate, risk_config, signal
+            )
+        except BrokerAuthError as exc:
+            log.info("saxo_reauth_required", account_id=account.id, reason=str(exc))
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "saxo_reauth_required",
+                    "message": (
+                        "Saxo session expired or never authenticated; "
+                        "run 'snapdinvest auth saxo --account <id>'"
+                    ),
+                    "account_id": account.id,
+                },
+            ) from exc
+
+        kind = _map_outcome_kind(outcome)
+        return PlaceOrderResponse(
+            kind=kind,
+            order_id=outcome.order_id,
+            reason=outcome.gate_reason or outcome.reason,
+            saxo_error_code=outcome.saxo_error_code,
+        )
+
     return app
+
+
+def _map_outcome_kind(outcome: Any) -> str:
+    """Collapse `ExecutionOutcome` into the surface kind exposed to clients."""
+    if not outcome.gate_allowed:
+        if outcome.order_status == "promotion_denied":
+            return "promotion_denied"
+        return "risk_denied"
+    if outcome.order_status == "rejected":
+        return "rejected"
+    if outcome.order_status == "broker_down":
+        return "broker_down"
+    if outcome.order_status == "hold":
+        return "hold"
+    return "filled"
 
 
 app = create_app()

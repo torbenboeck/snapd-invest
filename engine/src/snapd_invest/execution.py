@@ -49,6 +49,8 @@ class ExecutionOutcome:
     gate_reason: str | None
     order_id: str | None
     order_status: str | None
+    reason: str | None = None
+    saxo_error_code: str | None = None
 
 
 def _make_idempotency_key(signal: Signal) -> str:
@@ -171,7 +173,7 @@ async def execute_signal(
             instrument=instrument,
             side=signal.action,
             quantity=signal.quantity,
-            limit_price=None,
+            limit_price=signal.limit_price,
             source=signal.source,
             idempotency_key=_make_idempotency_key(signal),
             correlation_id=signal.correlation_id,
@@ -217,6 +219,8 @@ async def execute_signal(
             gate_reason=None,
             order_id=None,
             order_status="rejected",
+            reason=result.reason,
+            saxo_error_code=result.saxo_error_code,
         )
 
     # BrokerDown
@@ -234,6 +238,7 @@ async def execute_signal(
         gate_reason=None,
         order_id=None,
         order_status="broker_down",
+        reason=result.detail,
     )
 
 
