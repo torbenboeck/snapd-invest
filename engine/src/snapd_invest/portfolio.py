@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
+from snapd_invest.audit import record_event
 from snapd_invest.models import Account, Bar, Instrument, Position, new_id
 
 if TYPE_CHECKING:
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.broker.saxo import SaxoBroker
     from snapd_invest.clock import Clock
 
 
@@ -115,11 +117,177 @@ async def _last_price(session: AsyncSession, instrument: Instrument) -> Decimal 
     return bar.close if bar else None
 
 
+async def reconcile_sim_positions(
+    session: AsyncSession,
+    clock: Clock,
+    broker: SaxoBroker,
+    account: Account,
+) -> None:
+    """Reconcile engine `Position` rows against Saxo's view for a sim account.
+
+    Decision matrix per `docs/specs/T-001B-saxo-trading.md` §4.7:
+
+    - **Match** (qty + avg_cost equal): no-op.
+    - **Drift** (we have, Saxo has, values differ): update our row to
+      Saxo's view; emit `position_drift`.
+    - **New** (Saxo has, we don't): create our row tagged `view_only`;
+      emit `position_view_only_created`. Also creates the `Instrument`
+      row if we don't have one for the UIC yet.
+    - **Gone** (we have, Saxo doesn't): zero our quantity; emit
+      `position_closed_externally`.
+
+    Saxo is the source of truth for sim accounts — our `Position` rows
+    are a cache, not a ledger.
+    """
+    saxo_positions = await broker.get_positions(session, account=account)
+
+    # Existing engine-side positions for this account.
+    existing_positions = list(
+        (await session.execute(select(Position).where(Position.account_id == account.id)))
+        .scalars()
+        .all()
+    )
+
+    # Pre-load instruments referenced by either side so we can match by UIC.
+    instrument_ids = {p.instrument_id for p in existing_positions}
+    existing_instruments_by_id: dict[str, Instrument] = {}
+    if instrument_ids:
+        rows = (
+            (await session.execute(select(Instrument).where(Instrument.id.in_(instrument_ids))))
+            .scalars()
+            .all()
+        )
+        existing_instruments_by_id = {i.id: i for i in rows}
+    saxo_uics = {p.uic for p in saxo_positions}
+    matched_existing_ids: set[str] = set()
+
+    for saxo_pos in saxo_positions:
+        instrument = await _instrument_for_saxo_position(session, saxo_pos)
+        position = next((p for p in existing_positions if p.instrument_id == instrument.id), None)
+        if position is None:
+            new_position = Position(
+                id=new_id(),
+                account_id=account.id,
+                instrument_id=instrument.id,
+                quantity=saxo_pos.amount,
+                avg_cost=saxo_pos.open_price,
+                tag="view_only",
+                updated_at=clock.now(),
+            )
+            session.add(new_position)
+            await record_event(
+                session,
+                clock,
+                event_type="position_view_only_created",
+                payload={
+                    "account_id": account.id,
+                    "instrument_symbol": instrument.symbol,
+                    "instrument_exchange": instrument.exchange,
+                    "saxo_uic": saxo_pos.uic,
+                    "amount": str(saxo_pos.amount),
+                    "open_price": str(saxo_pos.open_price),
+                },
+            )
+            continue
+        matched_existing_ids.add(position.id)
+        if position.quantity != saxo_pos.amount or position.avg_cost != saxo_pos.open_price:
+            await record_event(
+                session,
+                clock,
+                event_type="position_drift",
+                payload={
+                    "account_id": account.id,
+                    "instrument_symbol": instrument.symbol,
+                    "saxo_uic": saxo_pos.uic,
+                    "engine_quantity": str(position.quantity),
+                    "saxo_amount": str(saxo_pos.amount),
+                    "engine_avg_cost": str(position.avg_cost),
+                    "saxo_open_price": str(saxo_pos.open_price),
+                },
+            )
+            position.quantity = saxo_pos.amount
+            position.avg_cost = saxo_pos.open_price
+            position.updated_at = clock.now()
+
+    # Anything we had that Saxo no longer reports → zero it out.
+    for position in existing_positions:
+        if position.id in matched_existing_ids:
+            continue
+        engine_inst = existing_instruments_by_id.get(position.instrument_id)
+        if engine_inst is not None and engine_inst.saxo_uic in saxo_uics:
+            # Edge case: matched by UIC even if we missed it above (shouldn't
+            # happen given the loop, but be defensive).
+            continue
+        if position.quantity == Decimal("0"):
+            continue
+        await record_event(
+            session,
+            clock,
+            event_type="position_closed_externally",
+            payload={
+                "account_id": account.id,
+                "instrument_id": position.instrument_id,
+                "previous_quantity": str(position.quantity),
+            },
+        )
+        position.quantity = Decimal("0")
+        position.updated_at = clock.now()
+
+    await session.flush()
+
+
+_FX_BASE_EXCHANGE = "FX"
+
+
+async def _instrument_for_saxo_position(session: AsyncSession, saxo_pos: object) -> Instrument:
+    """Look up an `Instrument` by Saxo UIC, creating it if missing.
+
+    `saxo_pos` is duck-typed to `SaxoPosition`; we keep the runtime type
+    string-loose to avoid a `from snapd_invest.broker.saxo import SaxoPosition`
+    at module level (which would form a cycle through `broker/__init__.py`'s
+    eager PaperBroker import).
+    """
+    uic = saxo_pos.uic  # type: ignore[attr-defined]
+    stmt = select(Instrument).where(Instrument.saxo_uic == uic)
+    existing = (await session.execute(stmt)).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    symbol = saxo_pos.symbol  # type: ignore[attr-defined]
+    asset_type = saxo_pos.asset_type  # type: ignore[attr-defined]
+    currency = saxo_pos.currency  # type: ignore[attr-defined]
+    instrument = Instrument(
+        id=new_id(),
+        symbol=symbol or f"UIC-{uic}",
+        exchange=_FX_BASE_EXCHANGE if asset_type == "FxSpot" else "UNKNOWN",
+        instrument_type="fx" if asset_type == "FxSpot" else "stock",
+        currency=currency or "DKK",
+        tick_size=Decimal("0.00001") if asset_type == "FxSpot" else Decimal("0.01"),
+        saxo_uic=uic,
+        saxo_asset_type=asset_type,
+    )
+    session.add(instrument)
+    await session.flush()
+    return instrument
+
+
 async def build_summary(
-    session: AsyncSession, account: Account, *, _now: datetime | None = None
+    session: AsyncSession,
+    account: Account,
+    *,
+    broker: SaxoBroker | None = None,
+    clock: Clock | None = None,
+    _now: datetime | None = None,
 ) -> PortfolioSummary:
-    """Compute the full portfolio summary for an account."""
+    """Compute the full portfolio summary for an account.
+
+    For `sim` accounts, pass a `SaxoBroker` and `clock` to reconcile our
+    `Position` rows against Saxo's view before computing the summary. For
+    `paper` accounts the broker arg is ignored.
+    """
     _ = _now  # reserved
+    if account.account_type == "sim" and broker is not None and clock is not None:
+        await reconcile_sim_positions(session, clock, broker, account)
     positions = await list_positions(session, account)
 
     views: list[PositionView] = []

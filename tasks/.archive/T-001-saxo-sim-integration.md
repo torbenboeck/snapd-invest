@@ -1,10 +1,11 @@
 # T-001 — Saxo SIM integration
 
-**Status:** superseded
-**Superseded by:** T-001-A (this PR — auth + `get_account`) + T-001-B (deferred — placement, idempotency, MicroTrader wiring)
+**Status:** done
+**Superseded by:** T-001-A (merged in PR #5 — auth + `get_account`) + T-001-B (placement, idempotency, BrokerFactory + PromotionGate threading, position reconciliation, manual `place-order` CLI)
 **Created:** 2026-05-12
 **Owner:** Claude Code
 **Blocked by:** —
+**Closed:** 2026-05-21
 
 > ⚠️ **Note:** This task was drafted before OAuth research and incorrectly named
 > `client_credentials` as the grant type. Saxo does not support that flow for

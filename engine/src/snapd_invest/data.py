@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.broker.saxo import SaxoBroker
     from snapd_invest.clock import Clock
 
 
@@ -83,6 +84,12 @@ class FakeMarketDataProvider:
 # ----------------------------------------------------------------------------
 
 
+async def get_instrument(session: AsyncSession, *, symbol: str, exchange: str) -> Instrument | None:
+    """Look up an instrument by (symbol, exchange). Returns None if absent."""
+    stmt = select(Instrument).where(Instrument.symbol == symbol, Instrument.exchange == exchange)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def ensure_instrument(
     session: AsyncSession,
     *,
@@ -93,8 +100,7 @@ async def ensure_instrument(
     tick_size: Decimal = Decimal("0.01"),
 ) -> Instrument:
     """Get or create an instrument by (symbol, exchange)."""
-    stmt = select(Instrument).where(Instrument.symbol == symbol, Instrument.exchange == exchange)
-    existing = (await session.execute(stmt)).scalar_one_or_none()
+    existing = await get_instrument(session, symbol=symbol, exchange=exchange)
     if existing is not None:
         return existing
 
@@ -207,3 +213,56 @@ async def refresh_bars(
         limit=limit,
     )
     return await upsert_bars(session, instrument=instrument, bars=bars, source=source)
+
+
+# ----------------------------------------------------------------------------
+# Saxo instrument enrichment
+# ----------------------------------------------------------------------------
+
+_EXCHANGE_TO_ASSET_TYPE: dict[str, str] = {
+    "FX": "FxSpot",
+    "NASDAQ": "Stock",
+    "NYSE": "Stock",
+}
+
+
+def _exchange_to_asset_type(exchange: str) -> str:
+    return _EXCHANGE_TO_ASSET_TYPE.get(exchange.upper(), "Stock")
+
+
+async def ensure_saxo_instrument(
+    session: AsyncSession,
+    broker: SaxoBroker,
+    *,
+    symbol: str,
+    exchange: str,
+    instrument_type: str = "fx",
+) -> Instrument:
+    """Get or create an instrument and enrich it with Saxo UIC/asset-type metadata.
+
+    If the instrument already has `saxo_uic` populated, it is returned as-is
+    (no broker call). Otherwise `SaxoBroker.search_instruments` is called and
+    the first matching row is persisted before returning.
+
+    Raises `ValueError` if the broker returns no result for `symbol`.
+    """
+    instrument = await ensure_instrument(
+        session,
+        symbol=symbol,
+        exchange=exchange,
+        instrument_type=instrument_type,
+        currency="DKK",
+    )
+    if instrument.saxo_uic is not None:
+        return instrument
+
+    asset_type = _exchange_to_asset_type(exchange)
+    hits = await broker.search_instruments(session, symbol, asset_type=asset_type)
+    match = next((h for h in hits if h.symbol == symbol), None)
+    if match is None:
+        raise ValueError(f"Saxo returned no instrument matching symbol={symbol!r}")
+
+    instrument.saxo_uic = match.uic
+    instrument.saxo_asset_type = match.asset_type
+    await session.flush()
+    return instrument

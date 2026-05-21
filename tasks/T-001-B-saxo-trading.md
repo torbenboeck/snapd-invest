@@ -1,6 +1,6 @@
 # T-001-B — Saxo SIM trading (place_order, get_positions, get_last_price, idempotency, MicroTrader wiring)
 
-**Status:** pending
+**Status:** done
 **Created:** 2026-05-15
 **Owner:** Claude Code
 **Blocked by:** T-001-A (merged in PR #5)

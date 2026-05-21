@@ -207,6 +207,25 @@ class TestOAuthCallback:
                 },
             )
         )
+        respx.get(f"{SAXO_SIM_API_BASE}/port/v1/clients/me").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ClientKey": "client-key-abc",
+                    "DefaultAccountId": "22264911",
+                },
+            )
+        )
+        respx.get(f"{SAXO_SIM_API_BASE}/port/v1/accounts/me").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {"AccountKey": "acc-key-1", "AccountId": "22264911"},
+                    ],
+                },
+            )
+        )
 
         app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -221,6 +240,65 @@ class TestOAuthCallback:
         loaded = await load_tokens(db_session, cipher, account_id=account.id, broker="saxo")
         assert loaded is not None
         assert loaded.access_token == "a1"
+
+        # Identity backfill ran: account row now carries Saxo keys.
+        refreshed = (
+            await db_session.execute(select(Account).where(Account.id == account.id))
+        ).scalar_one()
+        await db_session.refresh(refreshed)
+        assert refreshed.saxo_client_key == "client-key-abc"
+        assert refreshed.saxo_account_key == "acc-key-1"
+        assert refreshed.saxo_account_id == "22264911"
+
+    @respx.mock
+    async def test_callback_succeeds_even_if_identity_backfill_fails(
+        self,
+        db_session: AsyncSession,
+        db_engine: object,
+        fake_clock: FakeClock,
+        sim_settings: Settings,
+    ) -> None:
+        """Identity backfill failures should NOT fail the callback — tokens
+        are stored either way and the user can retry by re-auth."""
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        pkce = generate_pkce()
+        await persist_oauth_state(
+            db_session,
+            fake_clock,
+            account_id=account.id,
+            broker="saxo",
+            state="state-2",
+            code_verifier=pkce.verifier,
+        )
+        await db_session.commit()
+
+        respx.post(SIM_TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "a2",
+                    "refresh_token": "r2",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 86400,
+                    "token_type": "Bearer",
+                },
+            )
+        )
+        # /clients/me returns 503: backfill blows up but tokens still land.
+        respx.get(f"{SAXO_SIM_API_BASE}/port/v1/clients/me").mock(
+            return_value=httpx.Response(503, text="upstream unavailable")
+        )
+
+        app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get("/v1/oauth/saxo/callback?code=auth-code&state=state-2")
+        assert resp.status_code == 200, resp.text
+
+        assert sim_settings.encryption_key is not None
+        cipher = FernetCipher(sim_settings.encryption_key.encode("ascii"))
+        await db_session.commit()
+        loaded = await load_tokens(db_session, cipher, account_id=account.id, broker="saxo")
+        assert loaded is not None and loaded.access_token == "a2"
 
     async def test_unknown_state_returns_400(
         self,

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import httpx
@@ -25,10 +26,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from snapd_invest.broker import Filled, OrderRequest, Rejected
 from snapd_invest.broker.saxo import SaxoBroker
 from snapd_invest.broker.saxo_oauth import load_tokens
 from snapd_invest.config import Settings
 from snapd_invest.crypto import FernetCipher
+from snapd_invest.data import ensure_saxo_instrument
 from snapd_invest.models import Account
 
 if TYPE_CHECKING:
@@ -98,3 +101,76 @@ class TestSaxoLiveGetAccount:
 
         assert info.client_key, "Saxo response missing ClientKey"
         assert info.user_key, "Saxo response missing UserKey"
+
+
+class TestSaxoLivePlaceAndCancel:
+    """Round-trip: resolve EURDKK → place a far-from-market limit order →
+    list /orders/me → cancel → list /orders/me again.
+
+    The limit is intentionally well below market (1.0 against typical ~7.47)
+    so the order sits open long enough to read+cancel before any fill.
+    """
+
+    async def test_place_and_cancel_round_trip(self, live_session: AsyncSession) -> None:
+        settings = Settings()
+        assert settings.saxo_env == "sim"
+        assert settings.saxo_client_id is not None
+        assert settings.encryption_key is not None
+        cipher = FernetCipher(settings.encryption_key.encode("ascii"))
+
+        account = (
+            await live_session.execute(select(Account).where(Account.account_type == "sim"))
+        ).scalar_one_or_none()
+        assert account is not None, "No SIM account; create one first."
+        assert account.saxo_account_key is not None, (
+            "Account missing saxo_account_key. Re-run `snapdinvest auth saxo --account <id>` "
+            "so identity backfill populates it."
+        )
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=_RealClock(),
+                cipher=cipher,
+                client_id=settings.saxo_client_id,
+                account_id=account.id,
+            )
+
+            instrument = await ensure_saxo_instrument(
+                live_session, broker, symbol="EURDKK", exchange="FX"
+            )
+            await live_session.commit()
+            assert instrument.saxo_uic is not None
+
+            idempotency_key = f"sim-live-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
+            result = await broker.place_order(
+                live_session,
+                OrderRequest(
+                    account=account,
+                    instrument=instrument,
+                    side="buy",
+                    quantity=Decimal("1000"),
+                    limit_price=Decimal("1.0"),
+                    source="manual-cli",
+                    idempotency_key=idempotency_key,
+                ),
+            )
+            await live_session.commit()
+            assert isinstance(result, Filled | Rejected), (
+                f"Unexpected placement outcome: {type(result).__name__}"
+            )
+            if isinstance(result, Rejected):
+                pytest.skip(f"Saxo rejected the test order (likely market closed): {result.reason}")
+
+            open_orders = await broker.get_open_orders(live_session)
+            placed = next((o for o in open_orders if o.external_reference == idempotency_key), None)
+            assert placed is not None, (
+                "Order placed but does not appear in /orders/me — check Saxo portal"
+            )
+
+            await broker.cancel_order(live_session, order_id=placed.order_id)
+
+            still_open = await broker.get_open_orders(live_session)
+            assert not any(o.order_id == placed.order_id for o in still_open), (
+                "Order remained in /orders/me after cancel"
+            )

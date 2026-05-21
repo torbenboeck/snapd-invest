@@ -133,6 +133,9 @@ app.Configure(config =>
 
     config.AddCommand<CreateAccountCommand>("create-account")
         .WithDescription("Create a new account row in the engine DB. Required before 'auth saxo'.");
+
+    config.AddCommand<PlaceOrderCommand>("place-order")
+        .WithDescription("Place a manual order (paper or sim) through the engine.");
 });
 
 return await app.RunAsync(filteredArgs);

@@ -38,6 +38,10 @@ class Signal:
     trade — bar close for strategies, last observed quote for agents. It is the
     risk gate's input for valuation (cash check, position sizing). It is *not*
     a broker constraint; market orders still go to the broker without a limit.
+
+    `limit_price`, when set, makes this a limit order rather than a market
+    order. Strategies don't set it (they emit market orders); manual
+    placement via `POST /v1/orders` does.
     """
 
     source: str
@@ -51,6 +55,7 @@ class Signal:
     emitted_at: datetime
     correlation_id: str | None = None
     reference_price: Decimal | None = None
+    limit_price: Decimal | None = None
 
 
 class IStrategy(Protocol):

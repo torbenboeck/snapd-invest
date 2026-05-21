@@ -83,6 +83,14 @@ internal sealed partial class LoggingEngineApi(IEngineApi inner, ILogger<Logging
             nameof(CreateAccountAsync), $"name={payload.Name}",
             () => inner.CreateAccountAsync(payload, ct));
 
+    public Task<PlaceOrderResponse> PlaceOrderAsync(
+        PlaceOrderRequest payload, CancellationToken ct = default)
+        => Invoke(
+            nameof(PlaceOrderAsync),
+            $"account={payload.AccountId} {payload.Side} {payload.Quantity} "
+                + $"{payload.InstrumentSymbol}@{payload.InstrumentExchange}",
+            () => inner.PlaceOrderAsync(payload, ct));
+
     private async Task<T> Invoke<T>(string operation, string? args, Func<Task<T>> call)
     {
         LogEngineCall(logger, operation, args ?? "-");

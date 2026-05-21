@@ -70,4 +70,9 @@ public interface IEngineApi
     Task<CreateAccountResponse> CreateAccountAsync(
         [Body] CreateAccountRequest payload,
         CancellationToken ct = default);
+
+    [Post("/v1/orders")]
+    Task<PlaceOrderResponse> PlaceOrderAsync(
+        [Body] PlaceOrderRequest payload,
+        CancellationToken ct = default);
 }

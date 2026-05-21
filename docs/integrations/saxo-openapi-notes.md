@@ -268,6 +268,109 @@ through the browser-based PKCE flow again.
 
 ---
 
+## T-001-B lessons learned
+
+Observed during the placement implementation; corrections + additions to
+the catalog above.
+
+### Identity backfill via the OAuth callback
+
+After `store_tokens` succeeds, the engine immediately calls
+`/port/v1/clients/me` + `/port/v1/accounts/me` and persists the result
+into `Account.saxo_client_key` / `Account.saxo_account_key` /
+`Account.saxo_account_id`. Failures here do **not** fail the callback —
+tokens are stored either way; the user can retry by re-authenticating.
+
+If the account row already carried a `saxo_account_id` (user-supplied at
+create-account time), the matching `AccountKey` is selected from
+`/accounts/me`. Otherwise the Client's `DefaultAccountId` is used. The
+backfill leaves `saxo_account_key` null if no row matches — the engine
+will surface `BrokerAuthError` on the next trading-side call and the
+CLI prints the actionable `snapdinvest auth saxo --account <id>`.
+
+### `ExternalReference` is our idempotency seat-belt
+
+Saxo dedupes on `ExternalReference` (verified field name; accepts up to
+~50 chars). Our 32-char SHA-256 idempotency_key fits comfortably. The
+engine also checks our own DB before POSTing — terminal Orders return
+`IdempotentReplay` without hitting Saxo at all. Pending rows trigger a
+best-effort reconcile via `/port/v1/orders/me` then flip the row to
+`filled` before returning replay.
+
+### Synchronous placement response is minimal
+
+`POST /trade/v2/orders` returns only `{"OrderId": "..."}` on success —
+no fill price, no fill quantity. We persist the engine `Order` row with
+`status="filled"` (MVP simplification) and skip Trade-row creation
+entirely. Position + cash reconciliation happens via
+`SaxoBroker.get_positions` (called from `build_summary` for sim
+accounts), not via a fill-price echo in the placement response.
+
+### Position reconciliation: Saxo wins
+
+For sim accounts, `Position` rows are a cache of Saxo's view, not a
+ledger. `portfolio.reconcile_sim_positions` handles four cases per
+spec §4.7:
+
+- **match** (qty + avg_cost equal): no-op.
+- **drift**: update our row to Saxo's view; emit `position_drift`.
+- **new** (Saxo has, we don't): create row tagged `view_only`;
+  auto-create the Instrument from Saxo's response; emit
+  `position_view_only_created`.
+- **gone** (we have, Saxo doesn't): zero our quantity; emit
+  `position_closed_externally`.
+
+### Error shapes we actually saw
+
+Saxo's trading endpoints can return either:
+
+```json
+{ "ErrorCode": "MarketClosed", "Message": "Market is closed" }
+```
+
+or:
+
+```json
+{ "ErrorInfo": { "ErrorCode": "...", "Message": "..." } }
+```
+
+The engine's `_parse_saxo_error` handles both flat and nested forms.
+Any 4xx body that parses as an error becomes a `Rejected` outcome
+carrying `saxo_error_code`; otherwise the underlying `BrokerHttpError`
+propagates.
+
+### Body shape for FxSpot orders that actually works
+
+The sample in the original "Endpoint catalog" section is correct;
+notable specifics learned during implementation:
+
+- `Amount` for FxSpot is the **base-currency** amount (e.g. for EURDKK
+  the amount is in EUR), not the notional in the account currency.
+- `ManualOrder=true` for human-approved / manual orders; `false` for
+  MicroTrader-driven flow. The engine derives this from
+  `OrderRequest.source` (`source.startswith("manual")`).
+- `OrderDuration` defaults to `DayOrder` for market orders and
+  `GoodTillCancel` for limit orders. Both shapes accepted.
+- httpx's encoder rejects `Decimal`, so the engine emits `Amount` and
+  `OrderPrice` as `float`. Saxo accepts both int and float input.
+
+### Cancel is per-AccountKey, not global
+
+`DELETE /trade/v2/orders/{orderId}` requires the `AccountKey` query
+parameter even though the order id is globally unique. Missing the
+param returns 400, not 404.
+
+### `_authed_request` refactor for verb-generic retry
+
+T-001-A's `_authed_get` had reactive-refresh-on-401 logic baked into
+the GET path. T-001-B extracted that into `_authed_request(method,
+path, *, json=None)` and made `_authed_get` / `_authed_post` /
+`_authed_delete` thin wrappers so all three reuse the same retry. Empty
+response bodies (204 No Content / empty 200) return `{}` so cancel
+flows don't crash `.json()`.
+
+---
+
 ## Testing posture
 
 - Unit tests use `respx` to mock httpx — no network at all.

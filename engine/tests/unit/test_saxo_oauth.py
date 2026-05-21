@@ -16,12 +16,16 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 
 from snapd_invest.broker import BrokerAuthError
+from snapd_invest.broker.saxo import SAXO_SIM_API_BASE
 from snapd_invest.broker.saxo_oauth import (
     SIM_TOKEN_URL,
     PkceChallenge,
     TokenSet,
+    backfill_saxo_identity,
     consume_oauth_state,
     exchange_code_for_tokens,
+    fetch_accounts_info,
+    fetch_client_info,
     generate_pkce,
     get_active_access_token,
     load_tokens,
@@ -435,3 +439,167 @@ class TestGetActiveAccessToken:
 
         assert route.call_count == 1
         assert results == ["fresh", "fresh"]
+
+
+CLIENTS_ME_URL = f"{SAXO_SIM_API_BASE}/port/v1/clients/me"
+ACCOUNTS_ME_OPENAPI_URL = f"{SAXO_SIM_API_BASE}/port/v1/accounts/me"
+
+
+class TestFetchClientInfo:
+    @respx.mock
+    async def test_returns_parsed_payload(self) -> None:
+        respx.get(CLIENTS_ME_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ClientKey": "client-key-abc",
+                    "ClientId": "1234567",
+                    "DefaultAccountId": "22264911",
+                    "DefaultCurrency": "DKK",
+                },
+            )
+        )
+        async with httpx.AsyncClient() as client:
+            info = await fetch_client_info(client, access_token="tok")
+        assert info["ClientKey"] == "client-key-abc"
+        assert info["DefaultAccountId"] == "22264911"
+
+    @respx.mock
+    async def test_raises_auth_error_on_401(self) -> None:
+        respx.get(CLIENTS_ME_URL).mock(return_value=httpx.Response(401, text="nope"))
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(BrokerAuthError, match="clients/me"):
+                await fetch_client_info(client, access_token="tok")
+
+
+class TestFetchAccountsInfo:
+    @respx.mock
+    async def test_returns_parsed_payload(self) -> None:
+        respx.get(ACCOUNTS_ME_OPENAPI_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "AccountKey": "acc-key-1",
+                            "AccountId": "22264911",
+                            "ClientKey": "client-key-abc",
+                            "CurrencyDecimals": 4,
+                            "Active": True,
+                        },
+                        {
+                            "AccountKey": "acc-key-2",
+                            "AccountId": "22264912",
+                            "ClientKey": "client-key-abc",
+                            "Active": True,
+                        },
+                    ],
+                },
+            )
+        )
+        async with httpx.AsyncClient() as client:
+            info = await fetch_accounts_info(client, access_token="tok")
+        assert len(info["Data"]) == 2
+        assert info["Data"][0]["AccountKey"] == "acc-key-1"
+
+
+class TestBackfillSaxoIdentity:
+    @respx.mock
+    async def test_picks_account_matching_saxo_account_id(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        account = await create_account(
+            db_session,
+            fake_clock,
+            name="sim",
+            account_type="sim",
+            saxo_account_id="22264912",
+        )
+        respx.get(CLIENTS_ME_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ClientKey": "client-key-abc",
+                    "ClientId": "1234567",
+                    "DefaultAccountId": "22264911",
+                },
+            )
+        )
+        respx.get(ACCOUNTS_ME_OPENAPI_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {"AccountKey": "acc-key-1", "AccountId": "22264911"},
+                        {"AccountKey": "acc-key-2", "AccountId": "22264912"},
+                    ],
+                },
+            )
+        )
+        async with httpx.AsyncClient() as client:
+            await backfill_saxo_identity(db_session, client, access_token="tok", account=account)
+
+        assert account.saxo_client_key == "client-key-abc"
+        assert account.saxo_account_key == "acc-key-2"
+        assert account.saxo_account_id == "22264912"
+
+    @respx.mock
+    async def test_falls_back_to_default_account_id(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        respx.get(CLIENTS_ME_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ClientKey": "client-key-abc",
+                    "DefaultAccountId": "22264911",
+                },
+            )
+        )
+        respx.get(ACCOUNTS_ME_OPENAPI_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {"AccountKey": "acc-key-1", "AccountId": "22264911"},
+                    ],
+                },
+            )
+        )
+        async with httpx.AsyncClient() as client:
+            await backfill_saxo_identity(db_session, client, access_token="tok", account=account)
+
+        assert account.saxo_client_key == "client-key-abc"
+        assert account.saxo_account_key == "acc-key-1"
+        assert account.saxo_account_id == "22264911"
+
+    @respx.mock
+    async def test_leaves_account_key_null_when_no_match(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        account = await create_account(
+            db_session,
+            fake_clock,
+            name="sim",
+            account_type="sim",
+            saxo_account_id="99999999",
+        )
+        respx.get(CLIENTS_ME_URL).mock(
+            return_value=httpx.Response(
+                200, json={"ClientKey": "client-key-abc", "DefaultAccountId": "22264911"}
+            )
+        )
+        respx.get(ACCOUNTS_ME_OPENAPI_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={"Data": [{"AccountKey": "acc-key-1", "AccountId": "22264911"}]},
+            )
+        )
+        async with httpx.AsyncClient() as client:
+            await backfill_saxo_identity(db_session, client, access_token="tok", account=account)
+
+        assert account.saxo_client_key == "client-key-abc"
+        assert account.saxo_account_key is None
+        # saxo_account_id is left at its user-supplied value.
+        assert account.saxo_account_id == "99999999"
