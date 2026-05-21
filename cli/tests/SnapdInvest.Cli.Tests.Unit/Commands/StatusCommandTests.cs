@@ -17,7 +17,7 @@ public sealed class StatusCommandTests
         api.GetRecommendationsAsync(Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns([]);
 
-        var command = new StatusCommand(api);
+        var command = new StatusCommand(api, new CancellationTokenSource());
         var result = await command.ExecuteAsync(
             new CommandContext([], Substitute.For<IRemainingArguments>(), "status", null),
             new StatusCommand.Settings());
@@ -32,7 +32,7 @@ public sealed class StatusCommandTests
         api.GetPortfolioAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns<Task<PortfolioResponse>>(_ => throw new HttpRequestException("boom"));
 
-        var command = new StatusCommand(api);
+        var command = new StatusCommand(api, new CancellationTokenSource());
         var result = await command.ExecuteAsync(
             new CommandContext([], Substitute.For<IRemainingArguments>(), "status", null),
             new StatusCommand.Settings());

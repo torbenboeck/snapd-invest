@@ -7,9 +7,10 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
+import structlog
 
 from snapd_invest.agent import CONSERVATIVE_VALUE
-from snapd_invest.broker import PaperBroker
+from snapd_invest.broker import IBroker, PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.llm import FakeLlmProvider
 from snapd_invest.pipeline import (
@@ -19,7 +20,7 @@ from snapd_invest.pipeline import (
     run_microtrader_once,
 )
 from snapd_invest.portfolio import create_account
-from snapd_invest.promotion import Allowed
+from snapd_invest.promotion import Allowed, PromotionDecision
 from snapd_invest.recommendation import create_recommendation
 from snapd_invest.risk import RiskConfig
 from snapd_invest.strategy import Signal, SMACrossoverConfig
@@ -27,8 +28,20 @@ from snapd_invest.strategy import Signal, SMACrossoverConfig
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import FakeClock
-    from snapd_invest.models import Instrument
+    from snapd_invest.models import Account, Instrument
+
+
+def _factory_for(broker: PaperBroker) -> BrokerFactory:
+    def factory(_account: Account) -> IBroker:
+        return broker
+
+    return factory
+
+
+def _allow_all(_account: Account, _broker: IBroker) -> PromotionDecision:
+    return Allowed()
 
 
 class TestParseWatchlistEntry:
@@ -106,8 +119,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            lambda _account: broker,
-            lambda _account, _broker: Allowed(),
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             account=account,
             instrument=instrument,
@@ -135,8 +148,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            lambda _account: broker,
-            lambda _account, _broker: Allowed(),
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             account=account,
             instrument=instrument,
@@ -145,6 +158,46 @@ class TestRunMicroTraderOnce:
 
         assert outcome.signals == []
         assert outcome.execution_summaries == []
+
+    async def test_binds_correlation_id_to_structlog_contextvars(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-14: scheduled ticks have no HTTP middleware to bind correlation_id.
+        The pipeline must bind it itself so inner logs carry the ID.
+
+        We assert this by intercepting the BrokerFactory: when called during
+        the tick, the current contextvars dict must contain the correlation_id.
+        """
+        account = await create_account(
+            db_session, fake_clock, name="paper", initial_cash=Decimal("100000")
+        )
+        instrument = await _seed_aapl_with_golden_cross_bars(db_session)
+        broker = PaperBroker(fake_clock)
+        observed: dict[str, str] = {}
+
+        def factory(_account: Account) -> IBroker:
+            observed.update({k: str(v) for k, v in structlog.contextvars.get_contextvars().items()})
+            return broker
+
+        # Pre-condition: no correlation_id bound on entry.
+        assert "correlation_id" not in structlog.contextvars.get_contextvars()
+
+        await run_microtrader_once(
+            db_session,
+            fake_clock,
+            factory,
+            _allow_all,
+            RiskConfig(),
+            account=account,
+            instrument=instrument,
+            strategy_config=SMACrossoverConfig(short_period=2, long_period=5),
+            correlation_id="corr-xyz",
+        )
+
+        assert observed.get("correlation_id") == "corr-xyz"
+
+        # Post-condition: helper unbound on exit.
+        assert "correlation_id" not in structlog.contextvars.get_contextvars()
 
     async def test_risk_kill_switch_rejects_signal(
         self, db_session: AsyncSession, fake_clock: FakeClock
@@ -162,8 +215,8 @@ class TestRunMicroTraderOnce:
         outcome = await run_microtrader_once(
             db_session,
             fake_clock,
-            lambda _account: broker,
-            lambda _account, _broker: Allowed(),
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(kill_switch=True),
             account=account,
             instrument=instrument,

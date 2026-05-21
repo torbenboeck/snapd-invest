@@ -19,6 +19,10 @@ When a task is completed:
 
 ## Completed
 
-- T-003 — Wire the APScheduler into FastAPI lifespan *(2026-05-14)*
-- T-001-A — Saxo SIM OAuth + get_account *(2026-05-15, PR #5)*
+- T-003 — Wire the APScheduler into FastAPI lifespan *(2026-05-14, PR #2)*
+- T-001-A — Saxo SIM OAuth + `get_account` *(2026-05-15, PR #5)*
 - T-001-B — Saxo SIM trading (place, cancel, positions, manual CLI) *(2026-05-21)*
+
+## Archived
+
+- T-001 — Saxo SIM integration *(superseded — split into T-001-A done + T-001-B pending; archived in `.archive/`)*

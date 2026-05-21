@@ -94,6 +94,11 @@ async def get_account_by_name(session: AsyncSession, name: str) -> Account | Non
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def get_account_by_id(session: AsyncSession, account_id: str) -> Account | None:
+    stmt = select(Account).where(Account.id == account_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def list_positions(session: AsyncSession, account: Account) -> Sequence[Position]:
     stmt = select(Position).where(
         Position.account_id == account.id, Position.quantity != Decimal("0")

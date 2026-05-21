@@ -85,6 +85,7 @@ class SMACrossoverConfig:
     long_period: int = 200
     interval: str = "1d"
     quantity_per_signal: Decimal = Decimal("1")
+    conviction: Decimal = Decimal("0.6")
 
 
 class SMACrossoverStrategy:
@@ -145,7 +146,7 @@ class SMACrossoverStrategy:
                 instrument_exchange=instrument.exchange,
                 action=action,
                 quantity=cfg.quantity_per_signal,
-                conviction=Decimal("0.6"),  # baseline conviction, not data-driven
+                conviction=cfg.conviction,
                 rationale=rationale,
                 emitted_at=emitted_at,
                 correlation_id=correlation_id,

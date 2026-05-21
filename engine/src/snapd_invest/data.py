@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from snapd_invest.models import Bar, Instrument, new_id
 
@@ -83,6 +84,12 @@ class FakeMarketDataProvider:
 # ----------------------------------------------------------------------------
 
 
+async def get_instrument(session: AsyncSession, *, symbol: str, exchange: str) -> Instrument | None:
+    """Look up an instrument by (symbol, exchange). Returns None if absent."""
+    stmt = select(Instrument).where(Instrument.symbol == symbol, Instrument.exchange == exchange)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def ensure_instrument(
     session: AsyncSession,
     *,
@@ -93,8 +100,7 @@ async def ensure_instrument(
     tick_size: Decimal = Decimal("0.01"),
 ) -> Instrument:
     """Get or create an instrument by (symbol, exchange)."""
-    stmt = select(Instrument).where(Instrument.symbol == symbol, Instrument.exchange == exchange)
-    existing = (await session.execute(stmt)).scalar_one_or_none()
+    existing = await get_instrument(session, symbol=symbol, exchange=exchange)
     if existing is not None:
         return existing
 
@@ -118,33 +124,38 @@ async def upsert_bars(
     bars: Sequence[BarData],
     source: str,
 ) -> int:
-    """Insert bars that don't already exist. Returns the count of new rows."""
-    inserted = 0
-    for bar in bars:
-        stmt = select(Bar).where(
-            Bar.instrument_id == instrument.id,
-            Bar.interval == bar.interval,
-            Bar.timestamp == bar.timestamp,
-        )
-        if (await session.execute(stmt)).scalar_one_or_none() is not None:
-            continue
-        session.add(
-            Bar(
-                id=new_id(),
-                instrument_id=instrument.id,
-                interval=bar.interval,
-                timestamp=bar.timestamp,
-                open=bar.open,
-                high=bar.high,
-                low=bar.low,
-                close=bar.close,
-                volume=bar.volume,
-                source=source,
-            )
-        )
-        inserted += 1
+    """Insert bars that don't already exist. Returns the count of new rows.
+
+    Uses SQLite's `INSERT ... ON CONFLICT DO NOTHING` against the
+    `(instrument_id, interval, timestamp)` unique constraint, so concurrent
+    inserts of the same bar do not race or trip an IntegrityError.
+    """
+    if not bars:
+        return 0
+    values = [
+        {
+            "id": new_id(),
+            "instrument_id": instrument.id,
+            "interval": bar.interval,
+            "timestamp": bar.timestamp,
+            "open": bar.open,
+            "high": bar.high,
+            "low": bar.low,
+            "close": bar.close,
+            "volume": bar.volume,
+            "source": source,
+        }
+        for bar in bars
+    ]
+    stmt = (
+        sqlite_insert(Bar)
+        .values(values)
+        .on_conflict_do_nothing(index_elements=["instrument_id", "interval", "timestamp"])
+    )
+    result = await session.execute(stmt)
     await session.flush()
-    return inserted
+    rowcount: int = getattr(result, "rowcount", 0) or 0
+    return rowcount
 
 
 async def load_recent_bars(

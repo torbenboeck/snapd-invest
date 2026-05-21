@@ -18,6 +18,7 @@ from snapd_invest.models import Instrument, Position, new_id
 from snapd_invest.portfolio import (
     build_summary,
     create_account,
+    get_account_by_id,
     get_account_by_name,
     reconcile_sim_positions,
 )
@@ -79,6 +80,19 @@ class TestGetAccountByName:
 
     async def test_returns_none_when_missing(self, db_session: AsyncSession) -> None:
         found = await get_account_by_name(db_session, "nope")
+        assert found is None
+
+
+class TestGetAccountById:
+    async def test_returns_existing(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
+        created = await create_account(db_session, fake_clock, name="paper")
+        found = await get_account_by_id(db_session, created.id)
+        assert found is not None
+        assert found.id == created.id
+        assert found.name == "paper"
+
+    async def test_returns_none_when_missing(self, db_session: AsyncSession) -> None:
+        found = await get_account_by_id(db_session, "no-such-id")
         assert found is None
 
 

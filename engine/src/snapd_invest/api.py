@@ -18,7 +18,6 @@ import structlog
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (  # noqa: TC002 — runtime needed for FastAPI get_type_hints on Annotated[AsyncSession, Depends(...)]
     AsyncSession,
     async_sessionmaker,
@@ -46,16 +45,17 @@ from snapd_invest.broker.saxo_oauth import (
 from snapd_invest.clock import Clock, SystemClock
 from snapd_invest.config import Settings, get_settings
 from snapd_invest.crypto import FernetCipher
-from snapd_invest.data import ensure_instrument, ensure_saxo_instrument
+from snapd_invest.data import ensure_instrument, ensure_saxo_instrument, get_instrument
 from snapd_invest.execution import execute_signal
 from snapd_invest.llm import OllamaProvider
 from snapd_invest.logging_config import configure_logging, get_logger
-from snapd_invest.models import Account, Instrument
+from snapd_invest.models import Account
 from snapd_invest.persistence import make_engine, make_session_factory, session_scope
 from snapd_invest.pipeline import run_agent_once, run_microtrader_once
 from snapd_invest.portfolio import (
     build_summary,
     create_account,
+    get_account_by_id,
     get_account_by_name,
 )
 from snapd_invest.promotion import PromotionGate, trivial_promotion_gate
@@ -74,6 +74,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
     from fastapi import Response
+
+    from snapd_invest.models import Account
 
 log: structlog.stdlib.BoundLogger = get_logger(__name__)
 
@@ -290,6 +292,13 @@ class RunOnceResponseDto(BaseModel):
     strategy: str
     signals: list[SignalDto]
     outcomes: list[dict[str, Any]]
+
+
+class RunAgentResponseDto(BaseModel):
+    correlation_id: str
+    agent: str
+    summary: str
+    recommendation_id: str | None
 
 
 class RecommendationDto(BaseModel):
@@ -546,7 +555,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
 
     # -- Agent: run-once --
 
-    @app.post("/v1/agents/run", tags=["agent"])
+    @app.post("/v1/agents/run", response_model=RunAgentResponseDto, tags=["agent"])
     async def run_agent_route(
         request: Request,
         session: Annotated[AsyncSession, Depends(session_dep)],
@@ -554,7 +563,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         llm: Annotated[OllamaProvider, Depends(llm_dep)],
         instrument_symbol: str = "AAPL",
         instrument_exchange: str = "NASDAQ",
-    ) -> dict[str, Any]:
+    ) -> RunAgentResponseDto:
         correlation_id = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())
         account = await get_account_by_name(session, "paper")
         if account is None:
@@ -576,12 +585,12 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
             instrument=instrument,
             correlation_id=correlation_id,
         )
-        return {
-            "correlation_id": correlation_id,
-            "agent": outcome.agent_name,
-            "summary": outcome.summary,
-            "recommendation_id": outcome.recommendation_id,
-        }
+        return RunAgentResponseDto(
+            correlation_id=correlation_id,
+            agent=outcome.agent_name,
+            summary=outcome.summary,
+            recommendation_id=outcome.recommendation_id,
+        )
 
     # -- Recommendations --
 
@@ -686,9 +695,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
                 detail="SAXO_CLIENT_ID/SAXO_REDIRECT_URI not configured",
             )
 
-        account = (
-            await session.execute(select(Account).where(Account.id == account_id))
-        ).scalar_one_or_none()
+        account = await get_account_by_id(session, account_id)
         if account is None:
             raise HTTPException(status_code=404, detail=f"account_id={account_id} not found")
 
@@ -757,9 +764,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         # is unavailable right now, persist tokens anyway — the user can
         # re-authenticate later and we'll retry. Identity is required for
         # placement (T-001-B) but not for the callback itself succeeding.
-        account = (
-            await session.execute(select(Account).where(Account.id == consumed.account_id))
-        ).scalar_one_or_none()
+        account = await get_account_by_id(session, consumed.account_id)
         if account is not None:
             try:
                 await backfill_saxo_identity(
@@ -828,9 +833,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         session: Annotated[AsyncSession, Depends(session_dep)],
         broker_factory: Annotated[BrokerFactory, Depends(broker_factory_dep)],
     ) -> AccountInfoDto:
-        account = (
-            await session.execute(select(Account).where(Account.id == account_id))
-        ).scalar_one_or_none()
+        account = await get_account_by_id(session, account_id)
         if account is None:
             raise HTTPException(status_code=404, detail="account not found")
 
@@ -880,9 +883,7 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         promotion_gate: Annotated[PromotionGate, Depends(promotion_gate_dep)],
         risk_config: Annotated[RiskConfig, Depends(risk_dep)],
     ) -> PlaceOrderResponse:
-        account = (
-            await session.execute(select(Account).where(Account.id == payload.account_id))
-        ).scalar_one_or_none()
+        account = await get_account_by_id(session, payload.account_id)
         if account is None:
             raise HTTPException(status_code=404, detail=f"account {payload.account_id} not found")
 
@@ -924,14 +925,19 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
         # from the broker (Saxo bid/ask mid or PaperBroker's last bar).
         reference_price = payload.limit_price
         if reference_price is None and payload.side == "buy":
-            instrument_for_quote = (
-                await session.execute(
-                    select(Instrument).where(
-                        Instrument.symbol == payload.instrument_symbol,
-                        Instrument.exchange == payload.instrument_exchange,
-                    )
+            instrument_for_quote = await get_instrument(
+                session,
+                symbol=payload.instrument_symbol,
+                exchange=payload.instrument_exchange,
+            )
+            if instrument_for_quote is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"instrument {payload.instrument_symbol}@"
+                        f"{payload.instrument_exchange} not found after resolve"
+                    ),
                 )
-            ).scalar_one()
             try:
                 reference_price = await broker.get_last_price(
                     session, instrument=instrument_for_quote

@@ -30,6 +30,7 @@ from snapd_invest.pipeline import (
     run_microtrader_once,
 )
 from snapd_invest.portfolio import get_account_by_name
+from snapd_invest.promotion import trivial_promotion_gate
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -90,10 +91,10 @@ def build_default_jobs(
     session_factory: async_sessionmaker[AsyncSession],
     clock: Clock,
     broker_factory: BrokerFactory,
-    promotion_gate: PromotionGate,
     llm: ILlmProvider,
     risk_config: RiskConfig,
     settings: Settings,
+    promotion_gate: PromotionGate = trivial_promotion_gate,
 ) -> list[JobConfig]:
     """Wire pipeline functions as APScheduler-friendly closures.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -9,10 +10,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from snapd_invest.agent import ensure_default_agent
-from snapd_invest.broker import PaperBroker
+from snapd_invest.broker import IBroker, PaperBroker
 from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.portfolio import create_account
-from snapd_invest.promotion import Allowed
+from snapd_invest.promotion import Allowed, PromotionDecision
 from snapd_invest.recommendation import (
     SignalModification,
     approve_and_execute,
@@ -28,7 +29,20 @@ from snapd_invest.strategy import Signal
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from snapd_invest.broker import BrokerFactory
     from snapd_invest.clock import FakeClock
+    from snapd_invest.models import Account
+
+
+def _factory_for(broker: PaperBroker) -> BrokerFactory:
+    def factory(_account: Account) -> IBroker:
+        return broker
+
+    return factory
+
+
+def _allow_all(_account: Account, _broker: IBroker) -> PromotionDecision:
+    return Allowed()
 
 
 async def _setup_world(session: AsyncSession, clock: FakeClock) -> tuple[object, object, object]:
@@ -138,8 +152,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            lambda _account: broker,
-            lambda _account, _broker: Allowed(),
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             recommendation=rec,
         )
@@ -163,8 +177,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            lambda _account: broker,
-            lambda _account, _broker: Allowed(),
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             recommendation=rec,
             modifications=[
@@ -192,8 +206,8 @@ class TestApproveAndExecute:
         outcome = await approve_and_execute(
             db_session,
             fake_clock,
-            lambda _account: broker,
-            lambda _account, _broker: Allowed(),
+            _factory_for(broker),
+            _allow_all,
             RiskConfig(),
             recommendation=rec,
             modifications=[
@@ -218,23 +232,14 @@ class TestApproveAndExecute:
             rationale="t",
         )
         broker = PaperBroker(fake_clock)
+        factory = _factory_for(broker)
         await approve_and_execute(
-            db_session,
-            fake_clock,
-            lambda _account: broker,
-            lambda _account, _broker: Allowed(),
-            RiskConfig(),
-            recommendation=rec,
+            db_session, fake_clock, factory, _allow_all, RiskConfig(), recommendation=rec
         )
         # Try again
         with pytest.raises(ValueError, match="not pending"):
             await approve_and_execute(
-                db_session,
-                fake_clock,
-                lambda _account: broker,
-                lambda _account, _broker: Allowed(),
-                RiskConfig(),
-                recommendation=rec,
+                db_session, fake_clock, factory, _allow_all, RiskConfig(), recommendation=rec
             )
 
     async def test_rejects_expired(self, db_session: AsyncSession, fake_clock: FakeClock) -> None:
@@ -254,11 +259,77 @@ class TestApproveAndExecute:
             await approve_and_execute(
                 db_session,
                 fake_clock,
-                lambda _account: broker,
-                lambda _account, _broker: Allowed(),
+                _factory_for(broker),
+                _allow_all,
                 RiskConfig(),
                 recommendation=rec,
             )
+
+    async def test_expired_path_does_not_mutate_before_raise(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-08: the expired path must not flush a status change before raising.
+        A caller who rolls back on the exception would otherwise undo the
+        mutation; here we just verify the status is unchanged after the raise,
+        so callers' rollback semantics stay simple."""
+        account, _, agent = await _setup_world(db_session, fake_clock)
+        rec = await create_recommendation(
+            db_session,
+            fake_clock,
+            agent_id=agent.id,
+            signals=[_signal(account.id)],
+            rationale="t",
+            ttl=timedelta(minutes=1),
+        )
+        fake_clock.advance(hours=2)
+        broker = PaperBroker(fake_clock)
+
+        with pytest.raises(ValueError, match="expired"):
+            await approve_and_execute(
+                db_session,
+                fake_clock,
+                _factory_for(broker),
+                _allow_all,
+                RiskConfig(),
+                recommendation=rec,
+            )
+        # The dedicated expire_overdue sweep is what should transition status.
+        fresh = await get_recommendation(db_session, rec.id)
+        assert fresh is not None
+        assert fresh.status == "pending"
+
+    async def test_concurrent_approve_only_one_succeeds(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """C-07: two concurrent approve_and_execute calls must not both
+        proceed; the conditional UPDATE serializes the transition."""
+        account, _, agent = await _setup_world(db_session, fake_clock)
+        rec = await create_recommendation(
+            db_session,
+            fake_clock,
+            agent_id=agent.id,
+            signals=[_signal(account.id)],
+            rationale="t",
+        )
+        broker = PaperBroker(fake_clock)
+
+        async def attempt() -> bool:
+            try:
+                await approve_and_execute(
+                    db_session,
+                    fake_clock,
+                    _factory_for(broker),
+                    _allow_all,
+                    RiskConfig(),
+                    recommendation=rec,
+                )
+            except ValueError:
+                return False
+            return True
+
+        results = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
+        successes = [r for r in results if r is True]
+        assert len(successes) == 1
 
 
 class TestReject:

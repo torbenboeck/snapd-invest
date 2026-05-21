@@ -5,23 +5,48 @@ using SnapdInvest.Cli.Commands;
 using SnapdInvest.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Refit;
 using Serilog;
 using Spectre.Console.Cli;
 
-var configuration = new ConfigurationBuilder()
+// `--engine-url <url>` is a friendly alias for `--Engine:Url <url>`. We pull
+// it out of `args` first and inject it as in-memory config so it takes
+// precedence over env + appsettings.json — matching what cli/CLAUDE.md
+// documents as the highest-priority source.
+var (engineUrlOverride, filteredArgs) = ExtractEngineUrlOverride(args);
+
+var configBuilder = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: true)
     .AddEnvironmentVariables(prefix: "SNAPDINVEST_")
-    .AddCommandLine(args)
-    .Build();
+    .AddCommandLine(filteredArgs);
+
+if (engineUrlOverride is not null)
+{
+    configBuilder.AddInMemoryCollection(
+        [new KeyValuePair<string, string?>($"{EngineOptions.SectionName}:Url", engineUrlOverride)]);
+}
+
+var configuration = configBuilder.Build();
 
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(configuration)
     .CreateLogger();
 
+// Ctrl+C should propagate as a CancellationToken into every async I/O call.
+// The CTS is registered as a singleton; commands take it via constructor DI
+// and pass `.Token` to Refit + Task.Delay.
+var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    cts.Cancel();
+};
+
 var services = new ServiceCollection();
 services.AddSingleton<IConfiguration>(configuration);
+services.AddSingleton(cts);
 services.Configure<EngineOptions>(configuration.GetSection(EngineOptions.SectionName));
 services.AddLogging(b => b.AddSerilog(dispose: true));
 services.AddTransient<IBrowserOpener, DefaultBrowserOpener>();
@@ -55,6 +80,18 @@ services
         c.BaseAddress = new Uri(url);
         c.Timeout = TimeSpan.FromSeconds(30);
     });
+
+// Decorate IEngineApi with a logging wrapper so every HTTP call is observable
+// without touching individual commands. We resolve the underlying HttpClient
+// from IHttpClientFactory (registered by AddRefitClient) and rebuild the
+// Refit proxy explicitly — re-resolving IEngineApi here would loop.
+services.AddSingleton<IEngineApi>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<LoggingEngineApi>>();
+    var inner = sp.GetRequiredService<IHttpClientFactory>().CreateClient(typeof(IEngineApi).FullName!);
+    var refit = RestService.For<IEngineApi>(inner, refitSettings);
+    return new LoggingEngineApi(refit, logger);
+});
 
 var registrar = new TypeRegistrar(services);
 var app = new CommandApp(registrar);
@@ -101,4 +138,30 @@ app.Configure(config =>
         .WithDescription("Place a manual order (paper or sim) through the engine.");
 });
 
-return await app.RunAsync(args);
+return await app.RunAsync(filteredArgs);
+
+static (string? Url, string[] Filtered) ExtractEngineUrlOverride(string[] inputArgs)
+{
+    var filtered = new List<string>(inputArgs.Length);
+    string? url = null;
+    for (var i = 0; i < inputArgs.Length; i++)
+    {
+        var a = inputArgs[i];
+        if (a.Equals("--engine-url", StringComparison.OrdinalIgnoreCase))
+        {
+            if (i + 1 < inputArgs.Length)
+            {
+                url = inputArgs[++i];
+            }
+        }
+        else if (a.StartsWith("--engine-url=", StringComparison.OrdinalIgnoreCase))
+        {
+            url = a["--engine-url=".Length..];
+        }
+        else
+        {
+            filtered.Add(a);
+        }
+    }
+    return (url, filtered.ToArray());
+}

@@ -19,7 +19,7 @@ public sealed class AuthSaxoCommandTests
                 new OAuthStatusResponse("sim-account", "saxo", true));
 
         var browserOpener = Substitute.For<IBrowserOpener>();
-        var cmd = new AuthSaxoCommand(api, browserOpener);
+        var cmd = new AuthSaxoCommand(api, browserOpener, new CancellationTokenSource());
         var settings = new AuthSaxoCommand.Settings { AccountId = "sim-account", PollIntervalMs = 1 };
         var context = new CommandContext([], Substitute.For<IRemainingArguments>(), "auth saxo", null);
 
@@ -41,7 +41,7 @@ public sealed class AuthSaxoCommandTests
             .Returns(new OAuthStatusResponse("sim-account", "saxo", false));
 
         var browserOpener = Substitute.For<IBrowserOpener>();
-        var cmd = new AuthSaxoCommand(api, browserOpener);
+        var cmd = new AuthSaxoCommand(api, browserOpener, new CancellationTokenSource());
         var settings = new AuthSaxoCommand.Settings
         {
             AccountId = "sim-account",
@@ -56,10 +56,36 @@ public sealed class AuthSaxoCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RespectsCancellation_DuringPolling()
+    {
+        var api = Substitute.For<IEngineApi>();
+        api.StartSaxoOAuthAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new AuthorizeUrlResponse("https://sim.logonvalidation.net/authorize?...", "state-1"));
+        api.GetSaxoOAuthStatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new OAuthStatusResponse("sim-account", "saxo", false));
+
+        var cts = new CancellationTokenSource();
+        cts.Cancel(); // already cancelled — first ThrowIfCancellationRequested exits the loop
+
+        var cmd = new AuthSaxoCommand(api, Substitute.For<IBrowserOpener>(), cts);
+        var settings = new AuthSaxoCommand.Settings
+        {
+            AccountId = "sim-account",
+            PollIntervalMs = 1,
+            MaxAttempts = 100,
+        };
+        var context = new CommandContext([], Substitute.For<IRemainingArguments>(), "auth saxo", null);
+
+        var exitCode = await cmd.ExecuteAsync(context, settings);
+
+        exitCode.ShouldBe(130);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RejectsEmptyAccount()
     {
         var api = Substitute.For<IEngineApi>();
-        var cmd = new AuthSaxoCommand(api, Substitute.For<IBrowserOpener>());
+        var cmd = new AuthSaxoCommand(api, Substitute.For<IBrowserOpener>(), new CancellationTokenSource());
         var context = new CommandContext([], Substitute.For<IRemainingArguments>(), "auth saxo", null);
 
         var exitCode = await cmd.ExecuteAsync(context, new AuthSaxoCommand.Settings { AccountId = "" });

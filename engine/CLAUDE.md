@@ -33,7 +33,7 @@ src/snapd_invest/
 ├── api.py              FastAPI app, routes, DI
 ├── audit.py            AuditEvent recording + queries
 ├── agent.py            LLM-powered agents
-├── broker.py           IBroker protocol + PaperBroker + (later) SaxoBroker
+├── broker/             IBroker protocol + PaperBroker + SaxoBroker + Saxo OAuth (subpackage)
 ├── clock.py            Clock protocol + SystemClock + FakeClock
 ├── data.py             Market data fetching (yfinance, ccxt) + caching
 ├── execution.py        Signal → Order pipeline; recommendation execution

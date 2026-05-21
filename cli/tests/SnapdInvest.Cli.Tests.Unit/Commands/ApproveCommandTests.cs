@@ -1,6 +1,4 @@
-using System.Reflection;
 using SnapdInvest.Cli.Commands;
-using SnapdInvest.Client.Models;
 
 namespace SnapdInvest.Cli.Tests.Unit.Commands;
 
@@ -11,18 +9,10 @@ namespace SnapdInvest.Cli.Tests.Unit.Commands;
 /// </summary>
 public sealed class ApproveCommandTests
 {
-    private static List<SignalModificationDto> ParseModifications(string[] inputs)
-    {
-        var method = typeof(ApproveCommand).GetMethod(
-            "ParseModifications",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (List<SignalModificationDto>)method.Invoke(null, [inputs])!;
-    }
-
     [Fact]
     public void ParseModifications_QuantityModification_Parsed()
     {
-        var result = ParseModifications(["AAPL@NASDAQ=2.5"]);
+        var result = ApproveCommand.ParseModifications(["AAPL@NASDAQ=2.5"]);
 
         result.Count.ShouldBe(1);
         result[0].InstrumentSymbol.ShouldBe("AAPL");
@@ -34,7 +24,7 @@ public sealed class ApproveCommandTests
     [Fact]
     public void ParseModifications_Skip_Parsed()
     {
-        var result = ParseModifications(["TSLA@NASDAQ=skip"]);
+        var result = ApproveCommand.ParseModifications(["TSLA@NASDAQ=skip"]);
 
         result.Count.ShouldBe(1);
         result[0].InstrumentSymbol.ShouldBe("TSLA");
@@ -44,25 +34,16 @@ public sealed class ApproveCommandTests
 
     [Fact]
     public void ParseModifications_MissingEquals_Throws()
-    {
-        Should.Throw<TargetInvocationException>(
-                () => ParseModifications(["AAPL@NASDAQ"]))
-            .InnerException.ShouldBeOfType<ArgumentException>();
-    }
+        => Should.Throw<ArgumentException>(
+            () => ApproveCommand.ParseModifications(["AAPL@NASDAQ"]));
 
     [Fact]
     public void ParseModifications_MissingExchange_Throws()
-    {
-        Should.Throw<TargetInvocationException>(
-                () => ParseModifications(["AAPL=5"]))
-            .InnerException.ShouldBeOfType<ArgumentException>();
-    }
+        => Should.Throw<ArgumentException>(
+            () => ApproveCommand.ParseModifications(["AAPL=5"]));
 
     [Fact]
     public void ParseModifications_InvalidQuantity_Throws()
-    {
-        Should.Throw<TargetInvocationException>(
-                () => ParseModifications(["AAPL@NASDAQ=notanumber"]))
-            .InnerException.ShouldBeOfType<ArgumentException>();
-    }
+        => Should.Throw<ArgumentException>(
+            () => ApproveCommand.ParseModifications(["AAPL@NASDAQ=notanumber"]));
 }
