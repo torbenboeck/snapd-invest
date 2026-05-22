@@ -196,6 +196,14 @@ def build_default_jobs(  # noqa: PLR0915 — handler closures are inherent to th
                         correlation_id=correlation_id,
                     )
                     await session.commit()
+            except BrokerAuthError as exc:
+                log.warning(
+                    "scheduler_skipped",
+                    job="microtrader_tick",
+                    reason="saxo_reauth_required",
+                    entry=entry,
+                    detail=str(exc),
+                )
             except Exception:
                 log.exception("scheduler_job_failed", job="microtrader_tick", entry=entry)
 
@@ -217,6 +225,14 @@ def build_default_jobs(  # noqa: PLR0915 — handler closures are inherent to th
                         correlation_id=correlation_id,
                     )
                     await session.commit()
+            except BrokerAuthError as exc:
+                log.warning(
+                    "scheduler_skipped",
+                    job="agent_tick",
+                    reason="saxo_reauth_required",
+                    entry=entry,
+                    detail=str(exc),
+                )
             except Exception:
                 log.exception("scheduler_job_failed", job="agent_tick", entry=entry)
 
@@ -263,6 +279,14 @@ def build_default_jobs(  # noqa: PLR0915 — handler closures are inherent to th
                         fetched=len(bars),
                         inserted=inserted,
                     )
+            except BrokerAuthError as exc:
+                log.warning(
+                    "scheduler_skipped",
+                    job="bar_refresh_tick",
+                    reason="saxo_reauth_required",
+                    entry=entry,
+                    detail=str(exc),
+                )
             except Exception:
                 log.exception("scheduler_job_failed", job="bar_refresh_tick", entry=entry)
 

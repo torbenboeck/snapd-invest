@@ -13,7 +13,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from snapd_invest.broker import IBroker, PaperBroker
+from snapd_invest.broker import BrokerAuthError, IBroker, PaperBroker
 from snapd_invest.broker.saxo import SaxoBroker, SaxoInstrumentHit
 from snapd_invest.config import Settings
 from snapd_invest.crypto import FernetCipher
@@ -294,6 +294,43 @@ class TestBarRefreshHandler:
             session_factory=factory,
             clock=fake_clock,
             broker_factory=_factory_returning(_BrokenBroker(fake_clock)),
+            promotion_gate=lambda _account, _broker: Allowed(),
+            llm=FakeLlmProvider(),
+            risk_config=RiskConfig(),
+            settings=settings,
+        )
+        refresh_job = next(j for j in jobs if j.job_id == "bar_refresh_tick")
+
+        await refresh_job.handler()  # must not raise
+
+    async def test_broker_auth_error_is_logged_quietly(
+        self, db_engine: AsyncEngine, fake_clock: FakeClock
+    ) -> None:
+        """Saxo session expiry is a routine "need re-auth" condition, not a
+        crash. The handler should swallow `BrokerAuthError` without dumping
+        a stack trace — operators re-authenticate via the CLI."""
+        factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        async with factory() as session:
+            account = await create_account(session, fake_clock, name="sim", account_type="sim")
+            account.saxo_client_key = "client-1"
+            account.saxo_account_key = "acc-1"
+            await session.commit()
+
+        class _ExpiredAuthBroker(_StubSaxoBroker):
+            async def get_charts(  # type: ignore[override]
+                self, *_args: object, **_kw: object
+            ) -> list[BarData]:
+                raise BrokerAuthError("saxo token refresh failed: 401")
+
+        settings = Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            watchlist=["EURDKK@FX"],
+            default_account_name="sim",
+        )
+        jobs = build_default_jobs(
+            session_factory=factory,
+            clock=fake_clock,
+            broker_factory=_factory_returning(_ExpiredAuthBroker(fake_clock)),
             promotion_gate=lambda _account, _broker: Allowed(),
             llm=FakeLlmProvider(),
             risk_config=RiskConfig(),
