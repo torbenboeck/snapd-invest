@@ -82,15 +82,20 @@ services
     });
 
 // Decorate IEngineApi with a logging wrapper so every HTTP call is observable
-// without touching individual commands. We resolve the underlying HttpClient
-// from IHttpClientFactory (registered by AddRefitClient) and rebuild the
-// Refit proxy explicitly — re-resolving IEngineApi here would loop.
+// without touching individual commands. We must reuse Refit's own descriptor
+// to build the inner instance — manually rebuilding via IHttpClientFactory
+// silently drops the `ConfigureHttpClient` configuration (BaseAddress is
+// Refit-internal-name-dependent and varies between versions).
+var refitDescriptor =
+    services.LastOrDefault(d => d.ServiceType == typeof(IEngineApi))
+    ?? throw new InvalidOperationException(
+        "IEngineApi not registered by AddRefitClient; check the order above.");
+services.Remove(refitDescriptor);
 services.AddSingleton<IEngineApi>(sp =>
 {
+    var inner = (IEngineApi)refitDescriptor.ImplementationFactory!(sp);
     var logger = sp.GetRequiredService<ILogger<LoggingEngineApi>>();
-    var inner = sp.GetRequiredService<IHttpClientFactory>().CreateClient(typeof(IEngineApi).FullName!);
-    var refit = RestService.For<IEngineApi>(inner, refitSettings);
-    return new LoggingEngineApi(refit, logger);
+    return new LoggingEngineApi(inner, logger);
 });
 
 var registrar = new TypeRegistrar(services);
