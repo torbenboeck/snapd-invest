@@ -34,6 +34,7 @@ from snapd_invest.pipeline import (
 )
 from snapd_invest.portfolio import get_account_by_name
 from snapd_invest.promotion import trivial_promotion_gate
+from snapd_invest.strategy import SMACrossoverConfig
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -176,6 +177,13 @@ def build_default_jobs(  # noqa: PLR0915 — handler closures are inherent to th
             )
         return account, instrument
 
+    strategy_config = SMACrossoverConfig(
+        short_period=settings.microtrader_sma_short_period,
+        long_period=settings.microtrader_sma_long_period,
+        interval=settings.bar_refresh_horizon,
+        quantity_per_signal=settings.microtrader_signal_quantity,
+    )
+
     async def _microtrader_handler() -> None:
         correlation_id = str(uuid.uuid4())
         for entry in settings.watchlist:
@@ -193,6 +201,7 @@ def build_default_jobs(  # noqa: PLR0915 — handler closures are inherent to th
                         risk_config,
                         account=account,
                         instrument=instrument,
+                        strategy_config=strategy_config,
                         correlation_id=correlation_id,
                     )
                     await session.commit()

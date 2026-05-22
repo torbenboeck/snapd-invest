@@ -7,10 +7,11 @@ invalid configuration causes a fail-fast crash rather than a runtime surprise.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -85,6 +86,47 @@ class Settings(BaseSettings):
             "long_period default plus a margin."
         ),
     )
+
+    # ------------------------------------------------------------------
+    # MicroTrader strategy (SMA crossover) — env-overridable so the
+    # operator can pick between conservative defaults (50/200/1d, the
+    # classic golden-cross setup) and an aggressive smoke-test profile
+    # (5/20/1h) without touching code.
+    # ------------------------------------------------------------------
+    microtrader_sma_short_period: int = Field(
+        default=50,
+        ge=2,
+        description=(
+            "Short SMA period for the MicroTrader. The shorter this is "
+            "relative to `long_period`, the more often crossovers fire."
+        ),
+    )
+    microtrader_sma_long_period: int = Field(
+        default=200,
+        ge=3,
+        description=(
+            "Long SMA period for the MicroTrader. Must be strictly greater than `short_period`."
+        ),
+    )
+    microtrader_signal_quantity: Decimal = Field(
+        default=Decimal("1"),
+        gt=Decimal("0"),
+        description=(
+            "Quantity (in instrument units) emitted per buy/sell signal. "
+            "FX pairs on Saxo SIM require a minimum lot — 5000 is safe."
+        ),
+    )
+
+    @field_validator("microtrader_sma_long_period")
+    @classmethod
+    def _long_period_must_exceed_short(cls, value: int, info: ValidationInfo) -> int:
+        short = info.data.get("microtrader_sma_short_period")
+        if isinstance(short, int) and value <= short:
+            raise ValueError(
+                f"microtrader_sma_long_period ({value}) must be > "
+                f"microtrader_sma_short_period ({short})"
+            )
+        return value
 
     # ------------------------------------------------------------------
     # Watchlist
