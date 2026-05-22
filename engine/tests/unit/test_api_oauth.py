@@ -335,6 +335,7 @@ class TestOAuthStatus:
             "account_id": account.id,
             "broker": "saxo",
             "authenticated": False,
+            "tokens_updated_at": None,
         }
 
     async def test_reports_authenticated_when_tokens_present(
@@ -367,6 +368,62 @@ class TestOAuthStatus:
             resp = await ac.get(f"/v1/oauth/saxo/status?account_id={account.id}")
         assert resp.status_code == 200
         assert resp.json()["authenticated"] is True
+
+    async def test_tokens_updated_at_advances_after_replacement(
+        self,
+        db_session: AsyncSession,
+        db_engine: object,
+        fake_clock: FakeClock,
+        sim_settings: Settings,
+    ) -> None:
+        """C-XX: the CLI distinguishes "old broken tokens still in DB" from
+        "fresh tokens just landed" by comparing `tokens_updated_at` across
+        polls. Storing the same tokens twice must advance the timestamp."""
+        assert sim_settings.encryption_key is not None
+        cipher = FernetCipher(sim_settings.encryption_key.encode("ascii"))
+        account = await create_account(db_session, fake_clock, name="sim", account_type="sim")
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=TokenSet(
+                access_token="a1",
+                refresh_token="r1",
+                access_expires_at=fake_clock.now() + timedelta(seconds=1200),
+                refresh_expires_at=fake_clock.now() + timedelta(seconds=86400),
+            ),
+        )
+        await db_session.commit()
+
+        app = _build_test_app(db_engine=db_engine, fake_clock=fake_clock, settings=sim_settings)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            first = (await ac.get(f"/v1/oauth/saxo/status?account_id={account.id}")).json()
+
+        # Simulate the callback storing a fresh token set a moment later.
+        fake_clock.advance(seconds=60)
+        await store_tokens(
+            db_session,
+            fake_clock,
+            cipher,
+            account_id=account.id,
+            broker="saxo",
+            tokens=TokenSet(
+                access_token="a2",
+                refresh_token="r2",
+                access_expires_at=fake_clock.now() + timedelta(seconds=1200),
+                refresh_expires_at=fake_clock.now() + timedelta(seconds=86400),
+            ),
+        )
+        await db_session.commit()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            second = (await ac.get(f"/v1/oauth/saxo/status?account_id={account.id}")).json()
+
+        assert first["tokens_updated_at"] is not None
+        assert second["tokens_updated_at"] is not None
+        assert second["tokens_updated_at"] != first["tokens_updated_at"]
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ from snapd_invest.data import BarData, ensure_instrument, upsert_bars
 from snapd_invest.llm import FakeLlmProvider
 from snapd_invest.pipeline import (
     expire_overdue_recommendations,
+    instrument_type_for_exchange,
     parse_watchlist_entry,
     run_agent_once,
     run_microtrader_once,
@@ -71,6 +72,20 @@ class TestParseWatchlistEntry:
     def test_empty_exchange(self) -> None:
         with pytest.raises(ValueError, match="empty exchange"):
             parse_watchlist_entry("AAPL@")
+
+
+class TestInstrumentTypeForExchange:
+    def test_fx_exchange_returns_fx(self) -> None:
+        assert instrument_type_for_exchange("FX") == "fx"
+
+    def test_fx_is_case_insensitive(self) -> None:
+        assert instrument_type_for_exchange("fx") == "fx"
+        assert instrument_type_for_exchange(" fx ") == "fx"
+
+    def test_anything_else_returns_stock(self) -> None:
+        assert instrument_type_for_exchange("NASDAQ") == "stock"
+        assert instrument_type_for_exchange("NYSE") == "stock"
+        assert instrument_type_for_exchange("OMXC25") == "stock"
 
 
 async def _seed_aapl_with_golden_cross_bars(session: AsyncSession) -> Instrument:

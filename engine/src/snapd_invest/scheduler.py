@@ -22,15 +22,19 @@ from apscheduler.events import EVENT_JOB_ERROR, JobExecutionEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from snapd_invest.data import ensure_instrument
+from snapd_invest.broker import BrokerAuthError
+from snapd_invest.broker.saxo import SaxoBroker
+from snapd_invest.data import ensure_instrument, ensure_saxo_instrument, upsert_bars
 from snapd_invest.pipeline import (
     expire_overdue_recommendations,
+    instrument_type_for_exchange,
     parse_watchlist_entry,
     run_agent_once,
     run_microtrader_once,
 )
 from snapd_invest.portfolio import get_account_by_name
 from snapd_invest.promotion import trivial_promotion_gate
+from snapd_invest.strategy import SMACrossoverConfig
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -86,7 +90,7 @@ def _log_job_error(event: JobExecutionEvent) -> None:
     )
 
 
-def build_default_jobs(
+def build_default_jobs(  # noqa: PLR0915 — handler closures are inherent to the wiring
     *,
     session_factory: async_sessionmaker[AsyncSession],
     clock: Clock,
@@ -106,6 +110,17 @@ def build_default_jobs(
     async def _resolve_account_and_instrument(
         session: AsyncSession, entry: str
     ) -> tuple[Account, Instrument] | None:
+        """Resolve a watchlist entry against the configured account.
+
+        For SIM accounts the instrument has to be enriched with Saxo's UIC
+        before any trading endpoint will accept it, so we route through
+        `ensure_saxo_instrument` (which calls `/ref/v1/instruments` under
+        the hood). For paper accounts the local row is sufficient.
+
+        Returns None — with a structured warning — when the account is
+        missing, when a SIM account hasn't had its OAuth identity
+        backfilled yet, or when the Saxo instrument lookup fails.
+        """
         symbol, exchange = parse_watchlist_entry(entry)
         account = await get_account_by_name(session, settings.default_account_name)
         if account is None:
@@ -115,14 +130,59 @@ def build_default_jobs(
                 account=settings.default_account_name,
             )
             return None
-        instrument = await ensure_instrument(
-            session,
-            symbol=symbol,
-            exchange=exchange,
-            instrument_type="stock",
-            currency="USD",
-        )
+
+        instrument_type = instrument_type_for_exchange(exchange)
+
+        if account.account_type == "sim":
+            if account.saxo_account_key is None or account.saxo_client_key is None:
+                log.warning(
+                    "scheduler_skipped",
+                    reason="saxo_identity_not_backfilled",
+                    account=account.name,
+                    entry=entry,
+                )
+                return None
+            broker = broker_factory(account)
+            if not isinstance(broker, SaxoBroker):
+                log.warning(
+                    "scheduler_skipped",
+                    reason="sim_account_without_saxo_broker",
+                    account=account.name,
+                    entry=entry,
+                )
+                return None
+            try:
+                instrument = await ensure_saxo_instrument(
+                    session,
+                    broker,
+                    symbol=symbol,
+                    exchange=exchange,
+                    instrument_type=instrument_type,
+                )
+            except (BrokerAuthError, ValueError):
+                log.exception(
+                    "scheduler_skipped",
+                    reason="saxo_instrument_lookup_failed",
+                    account=account.name,
+                    entry=entry,
+                )
+                return None
+        else:
+            instrument = await ensure_instrument(
+                session,
+                symbol=symbol,
+                exchange=exchange,
+                instrument_type=instrument_type,
+                currency=account.base_currency,
+            )
         return account, instrument
+
+    strategy_config = SMACrossoverConfig(
+        short_period=settings.microtrader_sma_short_period,
+        long_period=settings.microtrader_sma_long_period,
+        interval=settings.bar_refresh_horizon,
+        quantity_per_signal=settings.microtrader_signal_quantity,
+    )
 
     async def _microtrader_handler() -> None:
         correlation_id = str(uuid.uuid4())
@@ -141,9 +201,18 @@ def build_default_jobs(
                         risk_config,
                         account=account,
                         instrument=instrument,
+                        strategy_config=strategy_config,
                         correlation_id=correlation_id,
                     )
                     await session.commit()
+            except BrokerAuthError as exc:
+                log.warning(
+                    "scheduler_skipped",
+                    job="microtrader_tick",
+                    reason="saxo_reauth_required",
+                    entry=entry,
+                    detail=str(exc),
+                )
             except Exception:
                 log.exception("scheduler_job_failed", job="microtrader_tick", entry=entry)
 
@@ -165,8 +234,70 @@ def build_default_jobs(
                         correlation_id=correlation_id,
                     )
                     await session.commit()
+            except BrokerAuthError as exc:
+                log.warning(
+                    "scheduler_skipped",
+                    job="agent_tick",
+                    reason="saxo_reauth_required",
+                    entry=entry,
+                    detail=str(exc),
+                )
             except Exception:
                 log.exception("scheduler_job_failed", job="agent_tick", entry=entry)
+
+    async def _bar_refresh_handler() -> None:
+        """Refresh recent OHLC bars for SIM watchlist instruments.
+
+        Pulls candles from Saxo's `/chart/v1/charts` and upserts them via
+        `upsert_bars`. Paper accounts are skipped — they'll be served by
+        the yfinance provider (T-002) once it lands.
+        """
+        correlation_id = str(uuid.uuid4())
+        for entry in settings.watchlist:
+            try:
+                async with session_factory() as session:
+                    resolved = await _resolve_account_and_instrument(session, entry)
+                    if resolved is None:
+                        continue
+                    account, instrument = resolved
+                    if account.account_type != "sim":
+                        log.debug(
+                            "bar_refresh_skipped",
+                            reason="non_sim_account",
+                            account=account.name,
+                            entry=entry,
+                        )
+                        continue
+                    broker = broker_factory(account)
+                    if not isinstance(broker, SaxoBroker):
+                        continue
+                    bars = await broker.get_charts(
+                        session,
+                        instrument=instrument,
+                        interval=settings.bar_refresh_horizon,
+                        count=settings.bar_refresh_count,
+                    )
+                    inserted = await upsert_bars(
+                        session, instrument=instrument, bars=bars, source="saxo"
+                    )
+                    await session.commit()
+                    log.info(
+                        "bar_refresh_completed",
+                        entry=entry,
+                        correlation_id=correlation_id,
+                        fetched=len(bars),
+                        inserted=inserted,
+                    )
+            except BrokerAuthError as exc:
+                log.warning(
+                    "scheduler_skipped",
+                    job="bar_refresh_tick",
+                    reason="saxo_reauth_required",
+                    entry=entry,
+                    detail=str(exc),
+                )
+            except Exception:
+                log.exception("scheduler_job_failed", job="bar_refresh_tick", entry=entry)
 
     async def _expire_handler() -> None:
         try:
@@ -181,6 +312,11 @@ def build_default_jobs(
             log.exception("scheduler_job_failed", job="expire_overdue")
 
     return [
+        JobConfig(
+            job_id="bar_refresh_tick",
+            minutes=settings.bar_refresh_interval_minutes,
+            handler=_bar_refresh_handler,
+        ),
         JobConfig(
             job_id="microtrader_tick",
             minutes=settings.microtrader_interval_minutes,

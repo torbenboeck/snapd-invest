@@ -1071,3 +1071,183 @@ class TestSaxoBrokerGetPositions:
             )
             with pytest.raises(BrokerAuthError, match="saxo_client_key"):
                 await broker.get_positions(db_session, account=account)
+
+
+CHARTS_URL = f"{SAXO_SIM_API_BASE}/chart/v3/charts"
+
+
+class TestSaxoBrokerGetCharts:
+    @respx.mock
+    async def test_fx_returns_mid_of_bid_ask(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """FxSpot rows carry OpenBid/OpenAsk etc.; we average to mid."""
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        respx.get(CHARTS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "Time": "2026-05-20T00:00:00.000000Z",
+                            "OpenBid": 7.4560,
+                            "OpenAsk": 7.4564,
+                            "HighBid": 7.4571,
+                            "HighAsk": 7.4575,
+                            "LowBid": 7.4555,
+                            "LowAsk": 7.4559,
+                            "CloseBid": 7.4565,
+                            "CloseAsk": 7.4569,
+                        },
+                        {
+                            "Time": "2026-05-21T00:00:00.000000Z",
+                            "OpenBid": 7.4566,
+                            "OpenAsk": 7.4570,
+                            "HighBid": 7.4580,
+                            "HighAsk": 7.4584,
+                            "LowBid": 7.4562,
+                            "LowAsk": 7.4566,
+                            "CloseBid": 7.4575,
+                            "CloseAsk": 7.4579,
+                        },
+                    ],
+                },
+            )
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            bars = await broker.get_charts(
+                db_session,
+                instrument=_eurdkk_instrument(),
+                interval="1d",
+                count=2,
+            )
+
+        assert len(bars) == 2
+        # Mid of OpenBid + OpenAsk for the first row.
+        assert bars[0].open == Decimal("7.4562")
+        assert bars[0].close == Decimal("7.4567")
+        assert bars[0].volume == Decimal("0")
+        assert bars[0].interval == "1d"
+        assert bars[0].instrument_symbol == "EURDKK"
+        assert bars[1].close == Decimal("7.4577")
+
+    @respx.mock
+    async def test_stock_uses_single_ohlc(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """Stock chart rows carry plain Open/High/Low/Close with a Volume."""
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        respx.get(CHARTS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "Data": [
+                        {
+                            "Time": "2026-05-21T13:30:00.000000Z",
+                            "Open": 180.5,
+                            "High": 181.2,
+                            "Low": 179.8,
+                            "Close": 180.9,
+                            "Volume": 5_312_400,
+                        },
+                    ],
+                },
+            )
+        )
+
+        instrument = Instrument(
+            symbol="AAPL",
+            exchange="NASDAQ",
+            instrument_type="stock",
+            currency="USD",
+            tick_size=Decimal("0.01"),
+            saxo_uic=211,
+            saxo_asset_type="Stock",
+        )
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            bars = await broker.get_charts(db_session, instrument=instrument, interval="1h")
+
+        assert len(bars) == 1
+        assert bars[0].open == Decimal("180.5")
+        assert bars[0].close == Decimal("180.9")
+        assert bars[0].volume == Decimal("5312400")
+        assert bars[0].interval == "1h"
+
+    @respx.mock
+    async def test_empty_data_returns_empty_list(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        respx.get(CHARTS_URL).mock(return_value=httpx.Response(200, json={"Data": []}))
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            bars = await broker.get_charts(db_session, instrument=_eurdkk_instrument())
+
+        assert bars == []
+
+    async def test_missing_saxo_uic_raises_value_error(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(db_session, fake_clock, cipher)
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            with pytest.raises(ValueError, match="saxo_uic"):
+                await broker.get_charts(db_session, instrument=_eurdkk_instrument(saxo_uic=None))
+
+    async def test_unsupported_interval_raises_value_error(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            with pytest.raises(ValueError, match="unsupported interval"):
+                await broker.get_charts(db_session, instrument=_eurdkk_instrument(), interval="7m")

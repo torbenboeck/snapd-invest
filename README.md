@@ -32,6 +32,26 @@ cd cli
 dotnet run --project src/SnapdInvest.Cli -- status
 ```
 
+### Windows (cmd.exe)
+
+Double-click `start-engine.cmd` or run it from a Command Prompt at the
+repo root. It loads `engine\.env` and starts the engine on
+`http://127.0.0.1:8000` with the scheduler enabled. To make MicroTrader
+run autonomously on Saxo SIM, set in `engine\.env`:
+
+```
+SNAPDINVEST_DEFAULT_ACCOUNT_NAME=<your sim account name>
+SNAPDINVEST_WATCHLIST=EURDKK@FX
+SNAPDINVEST_SAXO_CLIENT_ID=<from Saxo developer portal>
+SNAPDINVEST_SAXO_REDIRECT_URI=http://127.0.0.1:8000/v1/oauth/saxo/callback
+SNAPDINVEST_ENCRYPTION_KEY=<32-byte Fernet key from `make init-keys`>
+```
+
+The scheduler will then refresh Saxo charts into the bar store, run the
+SMA crossover strategy on every tick, and place real SIM orders when a
+golden / death cross fires — all inside the existing promotion + risk
+gates.
+
 Full setup: [`docs/setup.md`](docs/setup.md).
 
 Working with this repo as a Claude Code agent: see [`AGENTS.md`](AGENTS.md).

@@ -57,6 +57,19 @@ def _bound_correlation_id(correlation_id: str | None) -> Iterator[None]:
         structlog.contextvars.unbind_contextvars("correlation_id")
 
 
+def instrument_type_for_exchange(exchange: str) -> str:
+    """Pick the right `Instrument.instrument_type` for a watchlist exchange.
+
+    The scheduler doesn't know whether `EURDKK@FX` is FX or stock without
+    asking; same for `AAPL@NASDAQ`. Mapping is shallow on purpose — the
+    exchange code is the authoritative hint, and downstream
+    `ensure_saxo_instrument` will reject anything Saxo doesn't recognise.
+    """
+    if exchange.strip().upper() == "FX":
+        return "fx"
+    return "stock"
+
+
 def parse_watchlist_entry(entry: str) -> tuple[str, str]:
     """Parse one 'SYMBOL@EXCHANGE' string into a (symbol, exchange) tuple.
 

@@ -35,6 +35,14 @@ public sealed class AuthSaxoCommand(IEngineApi api, IBrowserOpener browser, Canc
         var ct = cts.Token;
         try
         {
+            // Snapshot the existing tokens' timestamp BEFORE starting a new
+            // OAuth flow. An "authenticated=true" result alone is a false
+            // positive when old (failed-to-refresh) tokens linger in the
+            // engine DB — we wait for `TokensUpdatedAt` to advance, which
+            // only happens when a NEW callback successfully stores tokens.
+            var before = await api.GetSaxoOAuthStatusAsync(settings.AccountId, ct);
+            var initialUpdatedAt = before.TokensUpdatedAt;
+
             var start = await api.StartSaxoOAuthAsync(settings.AccountId, ct);
             AnsiConsole.MarkupLineInterpolated(
                 CultureInfo.InvariantCulture,
@@ -45,7 +53,7 @@ public sealed class AuthSaxoCommand(IEngineApi api, IBrowserOpener browser, Canc
             {
                 ct.ThrowIfCancellationRequested();
                 var status = await api.GetSaxoOAuthStatusAsync(settings.AccountId, ct);
-                if (status.Authenticated)
+                if (status.Authenticated && status.TokensUpdatedAt != initialUpdatedAt)
                 {
                     AnsiConsole.MarkupLine("[green]Tokens stored.[/]");
                     return 0;

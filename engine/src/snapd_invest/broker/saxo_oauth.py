@@ -269,6 +269,31 @@ async def load_tokens(
     )
 
 
+async def load_tokens_updated_at(
+    session: AsyncSession,
+    *,
+    account_id: str,
+    broker: str,
+) -> datetime | None:
+    """Return the `updated_at` of stored tokens for `(account_id, broker)`.
+
+    Used by `/v1/oauth/saxo/status` so the CLI can detect a fresh OAuth
+    completion: the CLI snapshots the value before opening the browser and
+    polls until it changes. Old (broken) tokens still exist in the DB
+    after a failed refresh, so a boolean "tokens present" signal is not
+    enough to distinguish "stale" from "newly refreshed".
+    """
+    row = (
+        await session.execute(
+            select(OAuthToken.updated_at).where(
+                OAuthToken.account_id == account_id,
+                OAuthToken.broker == broker,
+            )
+        )
+    ).scalar_one_or_none()
+    return _as_utc(row) if row is not None else None
+
+
 # ----------------------------------------------------------------------------
 # Refresh
 # ----------------------------------------------------------------------------

@@ -12,7 +12,8 @@ public sealed record AuthorizeUrlResponse(
 public sealed record OAuthStatusResponse(
     string AccountId,
     string Broker,
-    bool Authenticated
+    bool Authenticated,
+    DateTimeOffset? TokensUpdatedAt = null
 );
 
 public sealed record AccountInfoResponse(

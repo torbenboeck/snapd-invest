@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime  # noqa: TC003 — Pydantic resolves at runtime for OAuthStatusResponse
 from decimal import Decimal
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -38,7 +39,7 @@ from snapd_invest.broker.saxo_oauth import (
     consume_oauth_state,
     exchange_code_for_tokens,
     generate_pkce,
-    load_tokens,
+    load_tokens_updated_at,
     persist_oauth_state,
     store_tokens,
 )
@@ -349,6 +350,7 @@ class OAuthStatusResponse(BaseModel):
     account_id: str
     broker: str
     authenticated: bool
+    tokens_updated_at: datetime | None = None
 
 
 class AccountInfoDto(BaseModel):
@@ -785,17 +787,17 @@ def create_app() -> FastAPI:  # noqa: PLR0915 — route registrations live here 
     async def saxo_oauth_status(
         account_id: str,
         session: Annotated[AsyncSession, Depends(session_dep)],
-        settings: Annotated[Settings, Depends(settings_dep)],
     ) -> OAuthStatusResponse:
-        if settings.encryption_key is None:
-            return OAuthStatusResponse(account_id=account_id, broker="saxo", authenticated=False)
-
-        cipher = FernetCipher(settings.encryption_key.encode("ascii"))
-        loaded = await load_tokens(session, cipher, account_id=account_id, broker="saxo")
+        # `tokens_updated_at` lets the CLI poll for "the OAuth flow I just
+        # started has produced fresh tokens" — token *existence* alone
+        # gives false positives when an old, failed-to-refresh row is
+        # still in the DB.
+        updated_at = await load_tokens_updated_at(session, account_id=account_id, broker="saxo")
         return OAuthStatusResponse(
             account_id=account_id,
             broker="saxo",
-            authenticated=loaded is not None,
+            authenticated=updated_at is not None,
+            tokens_updated_at=updated_at,
         )
 
     @app.post("/v1/accounts", response_model=CreateAccountResponse, tags=["accounts"])
