@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json as _json
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +36,7 @@ from snapd_invest.broker.saxo_oauth import (
     refresh_tokens,
     store_tokens,
 )
+from snapd_invest.data import BarData
 from snapd_invest.models import Account, Order, new_id
 
 TERMINAL_ORDER_STATUSES = frozenset({"filled", "rejected", "cancelled"})
@@ -50,6 +52,18 @@ SAXO_SIM_API_BASE = "https://gateway.saxobank.com/sim/openapi"
 
 HTTP_UNAUTHORIZED = 401
 HTTP_BAD_REQUEST = 400
+
+# Maps a `BarData.interval` to Saxo's `/chart/v1/charts?Horizon=` value
+# (minutes per candle). Saxo accepts other Horizon values but we restrict
+# to the canonical set our strategies and tests use.
+_INTERVAL_TO_HORIZON: dict[str, int] = {
+    "1m": 1,
+    "5m": 5,
+    "15m": 15,
+    "1h": 60,
+    "60m": 60,
+    "1d": 1440,
+}
 
 
 @dataclass(slots=True, frozen=True)
@@ -129,6 +143,37 @@ def _parse_saxo_error(body: Any) -> tuple[str | None, str | None]:
     if isinstance(info, dict) and "ErrorCode" in info:
         return (str(info["ErrorCode"]), info.get("Message"))
     return (None, None)
+
+
+def _chart_row_to_bar(row: dict[str, Any], *, instrument: Instrument, interval: str) -> BarData:
+    """Map one `/chart/v1/charts` row to `BarData`.
+
+    Saxo returns FxSpot candles as bid/ask pairs (OpenBid / OpenAsk / ...)
+    with no single OHLC and zero volume; stock candles come as plain
+    Open / High / Low / Close with a Volume. We coalesce to mid for
+    bid/ask shapes and take the single OHLC otherwise.
+    """
+    if "OpenBid" in row:
+        two = Decimal(2)
+        open_ = (Decimal(str(row["OpenBid"])) + Decimal(str(row["OpenAsk"]))) / two
+        high = (Decimal(str(row["HighBid"])) + Decimal(str(row["HighAsk"]))) / two
+        low = (Decimal(str(row["LowBid"])) + Decimal(str(row["LowAsk"]))) / two
+        close = (Decimal(str(row["CloseBid"])) + Decimal(str(row["CloseAsk"]))) / two
+    else:
+        open_ = Decimal(str(row["Open"]))
+        high = Decimal(str(row["High"]))
+        low = Decimal(str(row["Low"]))
+        close = Decimal(str(row["Close"]))
+    return BarData(
+        instrument_symbol=instrument.symbol,
+        interval=interval,
+        timestamp=datetime.fromisoformat(row["Time"].replace("Z", "+00:00")),
+        open=open_,
+        high=high,
+        low=low,
+        close=close,
+        volume=Decimal(str(row.get("Volume", 0))),
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -415,6 +460,47 @@ class SaxoBroker:
         if bid is None or ask is None:
             return None
         return (Decimal(str(bid)) + Decimal(str(ask))) / Decimal(2)
+
+    async def get_charts(
+        self,
+        session: AsyncSession,
+        *,
+        instrument: Instrument,
+        interval: str = "1d",
+        count: int = 250,
+    ) -> list[BarData]:
+        """Fetch the most recent `count` candles via `/chart/v1/charts?Mode=UpTo`.
+
+        For instruments where Saxo returns bid/ask quotes per candle (FxSpot)
+        the OHLC is averaged to mid. Stock-style rows use the single OHLC
+        fields directly.
+
+        Raises:
+            ValueError: `instrument.saxo_uic` is None, or `interval` is not
+                one of: ``1m``, ``5m``, ``15m``, ``1h`` / ``60m``, ``1d``.
+        """
+        if instrument.saxo_uic is None:
+            raise ValueError(
+                f"instrument {instrument.symbol}@{instrument.exchange} has no saxo_uic; "
+                "call ensure_saxo_instrument first"
+            )
+        horizon = _INTERVAL_TO_HORIZON.get(interval)
+        if horizon is None:
+            raise ValueError(
+                f"unsupported interval {interval!r}; expected one of {sorted(_INTERVAL_TO_HORIZON)}"
+            )
+        payload = await self._authed_get(
+            session,
+            f"/chart/v1/charts?AssetType={instrument.saxo_asset_type}"
+            f"&Uic={instrument.saxo_uic}"
+            f"&Horizon={horizon}"
+            f"&Mode=UpTo"
+            f"&Count={count}",
+        )
+        return [
+            _chart_row_to_bar(row, instrument=instrument, interval=interval)
+            for row in payload.get("Data", [])
+        ]
 
     async def _account_key(self, session: AsyncSession) -> str:
         """Load this broker's account's `saxo_account_key` from the DB.
