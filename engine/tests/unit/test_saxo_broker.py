@@ -1251,3 +1251,32 @@ class TestSaxoBrokerGetCharts:
             )
             with pytest.raises(ValueError, match="unsupported interval"):
                 await broker.get_charts(db_session, instrument=_eurdkk_instrument(), interval="7m")
+
+    @respx.mock
+    async def test_request_url_carries_time_anchor(
+        self, db_session: AsyncSession, fake_clock: FakeClock
+    ) -> None:
+        """Regression: Saxo's `/chart/v3/charts?Mode=UpTo` returns
+        `InvalidModelState: Time is not provided` if `Time` is omitted.
+        The clock's now() must be threaded into the URL."""
+        cipher = FernetCipher(Fernet.generate_key())
+        account_id = await _seed_tokens(
+            db_session, fake_clock, cipher, saxo_account_key="acc-key-1"
+        )
+        route = respx.get(CHARTS_URL).mock(return_value=httpx.Response(200, json={"Data": []}))
+
+        async with httpx.AsyncClient() as client:
+            broker = SaxoBroker(
+                client=client,
+                clock=fake_clock,
+                cipher=cipher,
+                client_id="x",
+                account_id=account_id,
+            )
+            await broker.get_charts(db_session, instrument=_eurdkk_instrument())
+
+        assert route.called
+        sent_url = str(route.calls.last.request.url)
+        expected_time = fake_clock.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        assert f"Time={expected_time}" in sent_url
+        assert "Mode=UpTo" in sent_url

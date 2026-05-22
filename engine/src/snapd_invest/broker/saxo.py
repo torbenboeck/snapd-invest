@@ -489,12 +489,16 @@ class SaxoBroker:
             raise ValueError(
                 f"unsupported interval {interval!r}; expected one of {sorted(_INTERVAL_TO_HORIZON)}"
             )
+        # Mode=UpTo requires an explicit Time anchor — Saxo rejects the
+        # request as InvalidModelState otherwise.
+        time_anchor = self._clock.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         payload = await self._authed_get(
             session,
             f"/chart/v3/charts?AssetType={instrument.saxo_asset_type}"
             f"&Uic={instrument.saxo_uic}"
             f"&Horizon={horizon}"
             f"&Mode=UpTo"
+            f"&Time={time_anchor}"
             f"&Count={count}",
         )
         return [
