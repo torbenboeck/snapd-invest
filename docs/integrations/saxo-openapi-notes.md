@@ -378,6 +378,7 @@ response shape are otherwise identical for our usage (FxSpot bid/ask
 OHLC, Stock single OHLC, `Mode=UpTo` defaults to "now" when `Time` is
 omitted).
 
+
 ---
 
 ## Testing posture
