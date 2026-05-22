@@ -13,7 +13,7 @@ When a task is completed:
 
 ## Current backlog (priority order)
 
-1. T-002 — Real market data via yfinance
+1. T-002 — Real market data via yfinance (paper accounts)
 2. T-004 — End-to-end pipeline test
 3. T-005 — Generate the .NET client from OpenAPI via NSwag
 
@@ -22,6 +22,8 @@ When a task is completed:
 - T-003 — Wire the APScheduler into FastAPI lifespan *(2026-05-14, PR #2)*
 - T-001-A — Saxo SIM OAuth + `get_account` *(2026-05-15, PR #5)*
 - T-001-B — Saxo SIM trading (place, cancel, positions, manual CLI) *(2026-05-21)*
+- T-006 — Saxo bar data via `/chart/v1/charts` *(2026-05-22)*
+- T-007 — Scheduler SIM-aware (autonomous MicroTrader on Saxo SIM) *(2026-05-22)*
 
 ## Archived
 

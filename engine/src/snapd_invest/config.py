@@ -62,6 +62,29 @@ class Settings(BaseSettings):
         ge=1,
         description="Minutes between recommendation-expiry sweeps.",
     )
+    bar_refresh_interval_minutes: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Minutes between SaxoBroker chart-refresh ticks. Each tick "
+            "fetches the latest candles for every SIM watchlist instrument."
+        ),
+    )
+    bar_refresh_horizon: Literal["1m", "5m", "15m", "1h", "60m", "1d"] = Field(
+        default="1d",
+        description=(
+            "Candle size for the bar-refresh job. Must match the interval "
+            "the active strategy reads via `load_recent_bars` (SMA default: 1d)."
+        ),
+    )
+    bar_refresh_count: int = Field(
+        default=250,
+        ge=1,
+        description=(
+            "How many candles to fetch per refresh. 250 covers the SMA200 "
+            "long_period default plus a margin."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Watchlist
