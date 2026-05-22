@@ -53,7 +53,7 @@ SAXO_SIM_API_BASE = "https://gateway.saxobank.com/sim/openapi"
 HTTP_UNAUTHORIZED = 401
 HTTP_BAD_REQUEST = 400
 
-# Maps a `BarData.interval` to Saxo's `/chart/v1/charts?Horizon=` value
+# Maps a `BarData.interval` to Saxo's `/chart/v3/charts?Horizon=` value
 # (minutes per candle). Saxo accepts other Horizon values but we restrict
 # to the canonical set our strategies and tests use.
 _INTERVAL_TO_HORIZON: dict[str, int] = {
@@ -146,7 +146,7 @@ def _parse_saxo_error(body: Any) -> tuple[str | None, str | None]:
 
 
 def _chart_row_to_bar(row: dict[str, Any], *, instrument: Instrument, interval: str) -> BarData:
-    """Map one `/chart/v1/charts` row to `BarData`.
+    """Map one `/chart/v3/charts` row to `BarData`.
 
     Saxo returns FxSpot candles as bid/ask pairs (OpenBid / OpenAsk / ...)
     with no single OHLC and zero volume; stock candles come as plain
@@ -469,7 +469,7 @@ class SaxoBroker:
         interval: str = "1d",
         count: int = 250,
     ) -> list[BarData]:
-        """Fetch the most recent `count` candles via `/chart/v1/charts?Mode=UpTo`.
+        """Fetch the most recent `count` candles via `/chart/v3/charts?Mode=UpTo`.
 
         For instruments where Saxo returns bid/ask quotes per candle (FxSpot)
         the OHLC is averaged to mid. Stock-style rows use the single OHLC
@@ -491,7 +491,7 @@ class SaxoBroker:
             )
         payload = await self._authed_get(
             session,
-            f"/chart/v1/charts?AssetType={instrument.saxo_asset_type}"
+            f"/chart/v3/charts?AssetType={instrument.saxo_asset_type}"
             f"&Uic={instrument.saxo_uic}"
             f"&Horizon={horizon}"
             f"&Mode=UpTo"

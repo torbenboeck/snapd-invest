@@ -1073,7 +1073,7 @@ class TestSaxoBrokerGetPositions:
                 await broker.get_positions(db_session, account=account)
 
 
-CHARTS_URL = f"{SAXO_SIM_API_BASE}/chart/v1/charts"
+CHARTS_URL = f"{SAXO_SIM_API_BASE}/chart/v3/charts"
 
 
 class TestSaxoBrokerGetCharts:

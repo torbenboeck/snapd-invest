@@ -369,6 +369,15 @@ path, *, json=None)` and made `_authed_get` / `_authed_post` /
 response bodies (204 No Content / empty 200) return `{}` so cancel
 flows don't crash `.json()`.
 
+### Charts: `/chart/v3/`, not v1
+
+Saxo deprecated `/chart/v1/charts` in February 2025. Hitting v1 today
+returns Saxo's generic 404 HTML page, not a JSON error — same gateway,
+no auth/scope problem. Use `/chart/v3/charts`; the request and
+response shape are otherwise identical for our usage (FxSpot bid/ask
+OHLC, Stock single OHLC, `Mode=UpTo` defaults to "now" when `Time` is
+omitted).
+
 ---
 
 ## Testing posture
