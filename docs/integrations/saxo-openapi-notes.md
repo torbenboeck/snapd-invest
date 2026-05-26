@@ -373,10 +373,15 @@ flows don't crash `.json()`.
 
 Saxo deprecated `/chart/v1/charts` in February 2025. Hitting v1 today
 returns Saxo's generic 404 HTML page, not a JSON error — same gateway,
-no auth/scope problem. Use `/chart/v3/charts`; the request and
-response shape are otherwise identical for our usage (FxSpot bid/ask
-OHLC, Stock single OHLC, `Mode=UpTo` defaults to "now" when `Time` is
-omitted).
+no auth/scope problem. Use `/chart/v3/charts`; FxSpot rows carry
+bid/ask quotes per candle and stocks carry single OHLC + Volume.
+
+`Mode=UpTo` requires an explicit `Time` anchor — verified live:
+omitting it returns
+`HTTP 400 {"ErrorCode":"InvalidModelState","Message":"Time is not provided."}`
+(the earlier note here claiming Saxo defaults to "now" was wrong).
+Pass `Time=<ISO8601 UTC, e.g. 2026-05-22T13:00:00Z>` and you get the
+latest `Count` candles up to that anchor.
 
 
 ---
